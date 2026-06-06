@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>House Sale Projector</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f0f4f8;
+      color: #1a202c;
+      min-height: 100vh;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 2rem 1rem;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 680px;
+    }
+
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: 0.25rem;
+      color: #2d3748;
+    }
+
+    .subtitle {
+      color: #718096;
+      font-size: 0.875rem;
+      margin-bottom: 2rem;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 4px 16px rgba(0,0,0,0.05);
+      padding: 1.75rem;
+      margin-bottom: 1.25rem;
+    }
+
+    .card h2 {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #a0aec0;
+      margin-bottom: 1.25rem;
+    }
+
+    .field {
+      margin-bottom: 1.25rem;
+    }
+
+    .field:last-child { margin-bottom: 0; }
+
+    label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: #4a5568;
+      margin-bottom: 0.4rem;
+    }
+
+    .input-wrap {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+
+    .input-prefix,
+    .input-suffix {
+      position: absolute;
+      font-size: 0.9rem;
+      color: #a0aec0;
+      pointer-events: none;
+      font-weight: 500;
+    }
+
+    .input-prefix { left: 0.75rem; }
+    .input-suffix { right: 0.75rem; }
+
+    input[type="number"] {
+      width: 100%;
+      padding: 0.6rem 0.75rem;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 8px;
+      font-size: 1rem;
+      color: #2d3748;
+      background: #f7fafc;
+      outline: none;
+      transition: border-color 0.15s, box-shadow 0.15s;
+      appearance: textfield;
+      -moz-appearance: textfield;
+    }
+
+    input[type="number"]::-webkit-outer-spin-button,
+    input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
+
+    input[type="number"]:focus {
+      border-color: #4299e1;
+      box-shadow: 0 0 0 3px rgba(66,153,225,0.15);
+      background: #fff;
+    }
+
+    .has-prefix input { padding-left: 1.75rem; }
+    .has-suffix input { padding-right: 2.25rem; }
+
+    /* Sale prices list */
+    .sale-prices-list { display: flex; flex-direction: column; gap: 0.6rem; }
+
+    .sale-price-row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .sale-price-row .input-wrap { flex: 1; }
+
+    .btn-remove {
+      flex-shrink: 0;
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: #cbd5e0;
+      font-size: 1.1rem;
+      line-height: 1;
+      padding: 0.25rem;
+      border-radius: 4px;
+      transition: color 0.15s;
+    }
+
+    .btn-remove:hover { color: #fc8181; }
+
+    .btn-add {
+      margin-top: 0.75rem;
+      background: none;
+      border: 1.5px dashed #cbd5e0;
+      border-radius: 8px;
+      color: #718096;
+      font-size: 0.875rem;
+      cursor: pointer;
+      padding: 0.45rem 0.75rem;
+      width: 100%;
+      text-align: center;
+      transition: border-color 0.15s, color 0.15s;
+    }
+
+    .btn-add:hover { border-color: #4299e1; color: #4299e1; }
+
+    /* Loan term slider */
+    .term-row {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    input[type="range"] {
+      flex: 1;
+      accent-color: #4299e1;
+      cursor: pointer;
+    }
+
+    .term-value {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: #2d3748;
+      min-width: 5rem;
+      text-align: right;
+    }
+
+    /* Results */
+    .results-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+
+    @media (max-width: 480px) { .results-grid { grid-template-columns: 1fr; } }
+
+    .result-item {
+      background: #f7fafc;
+      border-radius: 8px;
+      padding: 1rem;
+    }
+
+    .result-item.highlight {
+      background: linear-gradient(135deg, #ebf8ff, #e6fffa);
+      border: 1.5px solid #bee3f8;
+    }
+
+    .result-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #a0aec0;
+      margin-bottom: 0.4rem;
+    }
+
+    .result-value {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #2d3748;
+    }
+
+    .result-item.highlight .result-value { color: #2b6cb0; }
+
+    .result-sub {
+      font-size: 0.8rem;
+      color: #718096;
+      margin-top: 0.2rem;
+    }
+
+    .no-sale-msg {
+      color: #a0aec0;
+      font-size: 0.875rem;
+      text-align: center;
+      padding: 1rem 0;
+    }
+
+    .sale-scenarios { display: flex; flex-direction: column; gap: 0.75rem; }
+
+    .scenario-card {
+      border: 1.5px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 1rem;
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 0.5rem;
+    }
+
+    .scenario-card .result-value { font-size: 1.1rem; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>House Sale Projector</h1>
+  <p class="subtitle">Estimate monthly mortgage payments based on your build cost and home sale scenarios.</p>
+
+  <!-- Build Cost -->
+  <div class="card">
+    <h2>New Build</h2>
+    <div class="field">
+      <label for="buildCost">Total build cost</label>
+      <div class="input-wrap has-prefix">
+        <span class="input-prefix">$</span>
+        <input type="number" id="buildCost" min="0" step="1000" placeholder="500000" />
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Loan term</label>
+      <div class="term-row">
+        <input type="range" id="loanTerm" min="5" max="30" step="5" value="30" />
+        <span class="term-value"><span id="loanTermDisplay">30</span> years</span>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="interestRate">Annual interest rate</label>
+      <div class="input-wrap has-suffix">
+        <input type="number" id="interestRate" min="0" max="30" step="0.05" placeholder="6.75" />
+        <span class="input-suffix">%</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Current House Sale Prices -->
+  <div class="card">
+    <h2>Current House — Possible Sale Prices</h2>
+    <div class="sale-prices-list" id="salePricesList"></div>
+    <button class="btn-add" id="btnAddPrice">+ Add scenario</button>
+  </div>
+
+  <!-- Results -->
+  <div class="card">
+    <h2>Monthly Payment Scenarios</h2>
+    <div id="resultsArea"></div>
+  </div>
+</div>
+
+<script>
+  const STORAGE_KEY = 'house-planner-v1';
+
+  // ── State ──────────────────────────────────────────────────────────────────
+  let state = {
+    buildCost: '',
+    loanTerm: 30,
+    interestRate: '',
+    salePrices: [''],
+  };
+
+  function loadState() {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) state = { ...state, ...JSON.parse(saved) };
+    } catch {}
+  }
+
+  function saveState() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch {}
+  }
+
+  // ── Mortgage math ──────────────────────────────────────────────────────────
+  function monthlyPayment(principal, annualRate, years) {
+    if (principal <= 0 || years <= 0) return null;
+    if (annualRate <= 0) return principal / (years * 12);
+    const r = annualRate / 100 / 12;
+    const n = years * 12;
+    return principal * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
+  }
+
+  function fmt(n) {
+    return '$' + Math.round(n).toLocaleString('en-US');
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+  function renderSalePrices() {
+    const list = document.getElementById('salePricesList');
+    list.innerHTML = '';
+    state.salePrices.forEach((price, i) => {
+      const row = document.createElement('div');
+      row.className = 'sale-price-row';
+
+      row.innerHTML = `
+        <div class="input-wrap has-prefix">
+          <span class="input-prefix">$</span>
+          <input type="number" min="0" step="1000" placeholder="350000"
+            value="${price}" data-idx="${i}" class="sale-price-input" />
+        </div>
+        <button class="btn-remove" data-idx="${i}" title="Remove">×</button>
+      `;
+      list.appendChild(row);
+    });
+
+    list.querySelectorAll('.sale-price-input').forEach(input => {
+      input.addEventListener('input', e => {
+        state.salePrices[+e.target.dataset.idx] = e.target.value;
+        saveState();
+        renderResults();
+      });
+    });
+
+    list.querySelectorAll('.btn-remove').forEach(btn => {
+      btn.addEventListener('click', e => {
+        const idx = +e.currentTarget.dataset.idx;
+        state.salePrices.splice(idx, 1);
+        if (state.salePrices.length === 0) state.salePrices = [''];
+        saveState();
+        renderSalePrices();
+        renderResults();
+      });
+    });
+  }
+
+  function renderResults() {
+    const area = document.getElementById('resultsArea');
+    const build = parseFloat(state.buildCost) || 0;
+    const rate = parseFloat(state.interestRate) || 0;
+    const term = state.loanTerm;
+
+    const validPrices = state.salePrices
+      .map(p => parseFloat(p))
+      .filter(p => !isNaN(p) && p >= 0);
+
+    if (build <= 0 || rate <= 0) {
+      area.innerHTML = '<p class="no-sale-msg">Enter a build cost and interest rate to see projections.</p>';
+      return;
+    }
+
+    if (validPrices.length === 0) {
+      // Show payment on full build cost
+      const payment = monthlyPayment(build, rate, term);
+      area.innerHTML = `
+        <div class="results-grid">
+          <div class="result-item highlight">
+            <div class="result-label">Monthly payment</div>
+            <div class="result-value">${fmt(payment)}</div>
+            <div class="result-sub">No sale proceeds applied</div>
+          </div>
+          <div class="result-item">
+            <div class="result-label">Loan amount</div>
+            <div class="result-value">${fmt(build)}</div>
+            <div class="result-sub">${term}-year @ ${rate}%</div>
+          </div>
+        </div>`;
+      return;
+    }
+
+    const scenarios = validPrices.map(salePrice => {
+      const loan = Math.max(0, build - salePrice);
+      const payment = loan > 0 ? monthlyPayment(loan, rate, term) : 0;
+      return { salePrice, loan, payment };
+    });
+
+    area.innerHTML = `
+      <div class="sale-scenarios">
+        ${scenarios.map(s => `
+          <div class="scenario-card">
+            <div class="result-item">
+              <div class="result-label">Sale price</div>
+              <div class="result-value">${fmt(s.salePrice)}</div>
+            </div>
+            <div class="result-item">
+              <div class="result-label">Loan needed</div>
+              <div class="result-value">${fmt(s.loan)}</div>
+              <div class="result-sub">${term}-yr @ ${rate}%</div>
+            </div>
+            <div class="result-item highlight">
+              <div class="result-label">Monthly payment</div>
+              <div class="result-value">${s.payment > 0 ? fmt(s.payment) : '—'}</div>
+              <div class="result-sub">${s.loan <= 0 ? 'Fully covered' : ''}</div>
+            </div>
+          </div>
+        `).join('')}
+      </div>`;
+  }
+
+  // ── Wire up inputs ─────────────────────────────────────────────────────────
+  function init() {
+    loadState();
+
+    const buildInput = document.getElementById('buildCost');
+    buildInput.value = state.buildCost;
+    buildInput.addEventListener('input', e => {
+      state.buildCost = e.target.value;
+      saveState(); renderResults();
+    });
+
+    const termSlider = document.getElementById('loanTerm');
+    termSlider.value = state.loanTerm;
+    document.getElementById('loanTermDisplay').textContent = state.loanTerm;
+    termSlider.addEventListener('input', e => {
+      state.loanTerm = +e.target.value;
+      document.getElementById('loanTermDisplay').textContent = state.loanTerm;
+      saveState(); renderResults();
+    });
+
+    const rateInput = document.getElementById('interestRate');
+    rateInput.value = state.interestRate;
+    rateInput.addEventListener('input', e => {
+      state.interestRate = e.target.value;
+      saveState(); renderResults();
+    });
+
+    document.getElementById('btnAddPrice').addEventListener('click', () => {
+      state.salePrices.push('');
+      saveState();
+      renderSalePrices();
+    });
+
+    renderSalePrices();
+    renderResults();
+  }
+
+  init();
+</script>
+</body>
+</html>
