@@ -155,26 +155,20 @@
     <h2>Property Tax</h2>
     <div class="field-row">
       <div class="field">
-        <label for="stateSelect">State</label>
+        <label for="stateSelect">State <span class="hint">(fills an average)</span></label>
         <select id="stateSelect">
           <option value="">Select a state…</option>
         </select>
       </div>
       <div class="field">
-        <label for="countySelect">County</label>
-        <select id="countySelect" disabled>
-          <option value="">Statewide average</option>
-        </select>
+        <label for="propertyTaxRate">Annual rate <span class="hint">(your local rate)</span></label>
+        <div class="input-wrap has-suffix">
+          <input type="number" id="propertyTaxRate" min="0" max="10" step="any" placeholder="e.g. 1.8" />
+          <span class="input-suffix">%</span>
+        </div>
       </div>
     </div>
-    <div class="field">
-      <label for="propertyTaxRate">Annual rate <span class="hint">(editable)</span></label>
-      <div class="input-wrap has-suffix">
-        <input type="number" id="propertyTaxRate" min="0" max="10" step="any" placeholder="e.g. 1.2" />
-        <span class="input-suffix">%</span>
-      </div>
-      <p class="hint" id="countyNote" style="margin-top:0.4rem;"></p>
-    </div>
+    <p class="hint">Picking a state fills its statewide average. Set this to your exact county/city rate for accuracy (e.g. Austin / Travis County ≈ 1.8%).</p>
   </div>
 
   <!-- Current home -->

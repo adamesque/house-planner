@@ -5,8 +5,8 @@ const { JSDOM } = require('jsdom');
 const app = require('./app.js');
 const {
   monthlyPayment, monthlyPropertyTax, netProceeds, computeProjection, fmt,
-  renderResults, renderSalePrices, STATE_TAX_RATES, STATE_NAMES, STATE_FIPS,
-  effectiveRate, parseCensusCounties, censusCountyUrl,
+  renderResults, renderSalePrices, STATE_TAX_RATES, STATE_NAMES,
+  DEFAULT_STATE, DEFAULT_TAX_RATE,
   __setState,
 } = app;
 
@@ -161,12 +161,10 @@ describe('state tax data', () => {
   test('has all 50 states plus DC', () => {
     assert.equal(Object.keys(STATE_TAX_RATES).length, 51);
     assert.equal(Object.keys(STATE_NAMES).length, 51);
-    assert.equal(Object.keys(STATE_FIPS).length, 51);
   });
-  test('every rate has a name and FIPS code', () => {
+  test('every rate has a name', () => {
     for (const code of Object.keys(STATE_TAX_RATES)) {
       assert.ok(STATE_NAMES[code], `missing name for ${code}`);
-      assert.ok(/^\d{2}$/.test(STATE_FIPS[code]), `bad FIPS for ${code}`);
     }
   });
   test('rates are plausible (0–3%)', () => {
@@ -176,56 +174,23 @@ describe('state tax data', () => {
   });
 });
 
-describe('effectiveRate', () => {
-  test('tax / value as a percent, 2 decimals', () => {
-    assert.equal(effectiveRate(8000, 400000), 2.0);
-    assert.equal(effectiveRate(7200, 500000), 1.44);
+describe('defaults (prefilled local rate)', () => {
+  test('default state is Texas with a known name', () => {
+    assert.equal(DEFAULT_STATE, 'TX');
+    assert.equal(STATE_NAMES[DEFAULT_STATE], 'Texas');
   });
-  test('null for census sentinel/missing values', () => {
-    assert.equal(effectiveRate(-666666666, 400000), null);
-    assert.equal(effectiveRate(8000, -666666666), null);
-    assert.equal(effectiveRate(null, 400000), null);
-    assert.equal(effectiveRate(8000, 0), null);
+  test('default rate is a plausible Austin/Travis rate above the TX average', () => {
+    const rate = parseFloat(DEFAULT_TAX_RATE);
+    assert.ok(rate > STATE_TAX_RATES.TX, 'Austin rate should exceed TX average');
+    assert.ok(rate > 1 && rate < 2.5, `default rate ${rate} out of plausible range`);
   });
-});
-
-describe('parseCensusCounties', () => {
-  const sample = [
-    ['NAME', 'B25103_001E', 'B25077_001E', 'state', 'county'],
-    ['Travis County, Texas', '8500', '450000', '48', '453'],   // 1.89%
-    ['Loving County, Texas', '-666666666', '90000', '48', '301'], // dropped (null tax)
-    ['Harris County, Texas', '4200', '300000', '48', '201'],   // 1.40%
-  ];
-  test('keeps valid rows, drops sentinel rows', () => {
-    const rows = parseCensusCounties(sample);
-    assert.equal(rows.length, 2);
-  });
-  test('strips state suffix from the county name', () => {
-    const rows = parseCensusCounties(sample);
-    assert.ok(rows.some(r => r.name === 'Travis County'));
-  });
-  test('sorts alphabetically', () => {
-    const rows = parseCensusCounties(sample);
-    assert.deepEqual(rows.map(r => r.name), ['Harris County', 'Travis County']);
-  });
-  test('computes the local effective rate', () => {
-    const travis = parseCensusCounties(sample).find(r => r.name === 'Travis County');
-    assert.equal(travis.rate, 1.89);
-    assert.equal(travis.code, '453');
-  });
-  test('handles malformed input safely', () => {
-    assert.deepEqual(parseCensusCounties(null), []);
-    assert.deepEqual(parseCensusCounties([]), []);
-    assert.deepEqual(parseCensusCounties([['NAME', 'state']]), []);
-  });
-});
-
-describe('censusCountyUrl', () => {
-  test('targets the given state FIPS', () => {
-    const url = censusCountyUrl('48');
-    assert.ok(url.includes('in=state:48'));
-    assert.ok(url.includes('for=county:*'));
-    assert.ok(url.includes('B25103_001E') && url.includes('B25077_001E'));
+  test('default rate feeds straight into a projection', () => {
+    const p = computeProjection({
+      buildCost: '500000', interestRate: '6', loanTerm: 30,
+      propertyTaxRate: DEFAULT_TAX_RATE, currentLoanBalance: '', salePrices: [],
+    });
+    // 500000 * 1.8% / 12 = 750
+    assert.ok(Math.abs(p.scenario.propertyTax - 750) < 0.01);
   });
 });
 
