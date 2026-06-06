@@ -161,12 +161,19 @@
         </select>
       </div>
       <div class="field">
-        <label for="propertyTaxRate">Annual rate <span class="hint">(editable)</span></label>
-        <div class="input-wrap has-suffix">
-          <input type="number" id="propertyTaxRate" min="0" max="10" step="any" placeholder="e.g. 1.2" />
-          <span class="input-suffix">%</span>
-        </div>
+        <label for="countySelect">County</label>
+        <select id="countySelect" disabled>
+          <option value="">Statewide average</option>
+        </select>
       </div>
+    </div>
+    <div class="field">
+      <label for="propertyTaxRate">Annual rate <span class="hint">(editable)</span></label>
+      <div class="input-wrap has-suffix">
+        <input type="number" id="propertyTaxRate" min="0" max="10" step="any" placeholder="e.g. 1.2" />
+        <span class="input-suffix">%</span>
+      </div>
+      <p class="hint" id="countyNote" style="margin-top:0.4rem;"></p>
     </div>
   </div>
 

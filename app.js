@@ -29,11 +29,26 @@ const STATE_NAMES = {
   WA: 'Washington', WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming',
 };
 
+// FIPS codes used by the Census API to scope a state's counties.
+const STATE_FIPS = {
+  AL: '01', AK: '02', AZ: '04', AR: '05', CA: '06', CO: '08', CT: '09',
+  DE: '10', DC: '11', FL: '12', GA: '13', HI: '15', ID: '16', IL: '17',
+  IN: '18', IA: '19', KS: '20', KY: '21', LA: '22', ME: '23', MD: '24',
+  MA: '25', MI: '26', MN: '27', MS: '28', MO: '29', MT: '30', NE: '31',
+  NV: '32', NH: '33', NJ: '34', NM: '35', NY: '36', NC: '37', ND: '38',
+  OH: '39', OK: '40', OR: '41', PA: '42', RI: '44', SC: '45', SD: '46',
+  TN: '47', TX: '48', UT: '49', VT: '50', VA: '51', WA: '53', WV: '54',
+  WI: '55', WY: '56',
+};
+
+const CENSUS_YEAR = 2023;
+
 let state = {
   buildCost: '',
   loanTerm: 30,
   interestRate: '',
   stateCode: '',
+  countyCode: '',
   propertyTaxRate: '',
   currentLoanBalance: '',
   salePrices: [''],
@@ -131,6 +146,48 @@ function computeProjection(s) {
 
 function fmt(n) {
   return '$' + Math.round(n).toLocaleString('en-US');
+}
+
+// ── County-level property tax via the Census ACS (browser fetch) ─────────────
+// Effective rate ≈ median real-estate taxes paid / median home value.
+
+function effectiveRate(medianTax, medianValue) {
+  const t = Number(medianTax), v = Number(medianValue);
+  // Census uses large negative sentinels (e.g. -666666666) for nulls.
+  if (!(t > 0) || !(v > 0)) return null;
+  return Math.round((t / v) * 100 * 100) / 100; // percent, 2 decimals
+}
+
+function censusCountyUrl(stateFips) {
+  return `https://api.census.gov/data/${CENSUS_YEAR}/acs/acs5` +
+    `?get=NAME,B25103_001E,B25077_001E&for=county:*&in=state:${stateFips}`;
+}
+
+// Turns the Census API's array-of-arrays into sorted {name, code, rate} rows.
+function parseCensusCounties(rows) {
+  if (!Array.isArray(rows) || rows.length < 2) return [];
+  const [header, ...data] = rows;
+  const ni = header.indexOf('NAME');
+  const ti = header.indexOf('B25103_001E');
+  const vi = header.indexOf('B25077_001E');
+  const ci = header.indexOf('county');
+  if (ni < 0 || ti < 0 || vi < 0 || ci < 0) return [];
+  return data
+    .map(r => {
+      const rate = effectiveRate(r[ti], r[vi]);
+      if (rate == null) return null;
+      return { name: String(r[ni]).split(',')[0], code: r[ci], rate };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+async function fetchCounties(stateCode) {
+  const fips = STATE_FIPS[stateCode];
+  if (!fips) return [];
+  const res = await fetch(censusCountyUrl(fips));
+  if (!res.ok) throw new Error('Census API ' + res.status);
+  return parseCensusCounties(await res.json());
 }
 
 // ── Rendering ───────────────────────────────────────────────────────────────
@@ -282,24 +339,72 @@ function init() {
   });
   renderTermButtons();
 
+  const taxInput = document.getElementById('propertyTaxRate');
+  const countySelect = document.getElementById('countySelect');
+  const countyNote = document.getElementById('countyNote');
+
+  function setRate(value) {
+    state.propertyTaxRate = String(value);
+    taxInput.value = state.propertyTaxRate;
+  }
+
+  // Fetches the state's counties from the Census API and fills the dropdown.
+  // Falls back silently to the state-average rate if the API is unavailable.
+  async function loadCounties(preselect) {
+    countySelect.innerHTML = '<option value="">Statewide average</option>';
+    if (!state.stateCode) {
+      countySelect.disabled = true;
+      countyNote.textContent = '';
+      return;
+    }
+    countySelect.disabled = true;
+    countyNote.textContent = 'Loading counties…';
+    try {
+      const counties = await fetchCounties(state.stateCode);
+      if (!counties.length) throw new Error('no data');
+      countySelect.insertAdjacentHTML('beforeend', counties
+        .map(c => `<option value="${c.code}" data-rate="${c.rate}">${c.name} — ${c.rate}%</option>`)
+        .join(''));
+      countySelect.disabled = false;
+      countyNote.textContent = 'Pick your county for a local rate, or edit it directly.';
+      if (preselect) {
+        countySelect.value = preselect;
+        const opt = countySelect.selectedOptions[0];
+        if (opt && opt.dataset.rate) setRate(opt.dataset.rate);
+      }
+    } catch {
+      state.countyCode = '';
+      countyNote.textContent = 'County data unavailable — using state average. You can edit the rate below.';
+    }
+  }
+
   const stateSelect = document.getElementById('stateSelect');
   stateSelect.value = state.stateCode;
   stateSelect.addEventListener('change', e => {
     state.stateCode = e.target.value;
-    // Auto-fill the rate from the chosen state (user can still override it).
-    if (STATE_TAX_RATES[state.stateCode] != null) {
-      state.propertyTaxRate = String(STATE_TAX_RATES[state.stateCode]);
-      document.getElementById('propertyTaxRate').value = state.propertyTaxRate;
-    }
+    state.countyCode = '';
+    // Start from the state average; the county dropdown can refine it.
+    if (STATE_TAX_RATES[state.stateCode] != null) setRate(STATE_TAX_RATES[state.stateCode]);
+    saveState(); renderResults();
+    loadCounties();
+  });
+
+  countySelect.addEventListener('change', e => {
+    state.countyCode = e.target.value;
+    const opt = e.target.selectedOptions[0];
+    if (opt && opt.dataset.rate) setRate(opt.dataset.rate);
+    else if (STATE_TAX_RATES[state.stateCode] != null) setRate(STATE_TAX_RATES[state.stateCode]);
     saveState(); renderResults();
   });
 
-  const taxInput = document.getElementById('propertyTaxRate');
   taxInput.value = state.propertyTaxRate;
   taxInput.addEventListener('input', e => {
     state.propertyTaxRate = e.target.value;
     saveState(); renderResults();
   });
+
+  // Restore county list on load if a state was previously chosen.
+  if (state.stateCode) loadCounties(state.countyCode);
 
   const balanceInput = document.getElementById('currentLoanBalance');
   balanceInput.value = state.currentLoanBalance;
@@ -322,8 +427,9 @@ function init() {
 // `module` is undefined, so this block is skipped and functions stay global.
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
-    STATE_TAX_RATES, STATE_NAMES,
+    STATE_TAX_RATES, STATE_NAMES, STATE_FIPS,
     monthlyPayment, monthlyPropertyTax, netProceeds, computeProjection, fmt,
+    effectiveRate, parseCensusCounties, censusCountyUrl,
     renderResults, renderSalePrices,
     __setState: s => { state = s; },
     __getState: () => state,
