@@ -1,4 +1,5 @@
 const STORAGE_KEY = 'house-planner-v3';
+const LEGACY_KEYS = ['house-planner-v2', 'house-planner-v1'];
 
 // Default local rate: Travis County (Austin, TX) effective property tax rate.
 const DEFAULT_STATE = 'TX';
@@ -41,12 +42,35 @@ let state = {
   propertyTaxRate: DEFAULT_TAX_RATE,
   currentLoanBalance: '',
   salePrices: [''],
+  sellingCosts: '',
+  otherCosts: '',
 };
+
+// Strip all non-digit characters — used to parse user-typed dollar inputs.
+function parseInput(str) {
+  return String(str).replace(/[^\d]/g, '');
+}
+
+// Format a raw digit string for display in a dollar input field (adds commas).
+function fmtInput(rawStr) {
+  const digits = parseInput(rawStr);
+  if (!digits) return '';
+  return parseInt(digits, 10).toLocaleString('en-US');
+}
 
 function loadState() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) state = { ...state, ...JSON.parse(saved) };
+    if (saved) { state = { ...state, ...JSON.parse(saved) }; return; }
+    // Migrate from older storage keys so users don't lose saved data.
+    for (const key of LEGACY_KEYS) {
+      const legacy = localStorage.getItem(key);
+      if (legacy) {
+        state = { ...state, ...JSON.parse(legacy) };
+        saveState();
+        break;
+      }
+    }
   } catch {}
 }
 
@@ -82,11 +106,11 @@ function computeProjection(s) {
   const term = Number(s.loanTerm) || 0;
   const taxRate = parseFloat(s.propertyTaxRate) || 0;
   const balance = parseFloat(s.currentLoanBalance) || 0;
+  const extraCosts = (parseFloat(s.sellingCosts) || 0) + (parseFloat(s.otherCosts) || 0);
 
-  if (build <= 0 || rate <= 0) {
-    return { ready: false };
-  }
+  if (build <= 0 || rate <= 0) return { ready: false };
 
+  // Property tax is based on the new home's assessed value, not extra costs.
   const propertyTax = monthlyPropertyTax(build, taxRate);
 
   const validPrices = (s.salePrices || [])
@@ -95,40 +119,28 @@ function computeProjection(s) {
 
   function scenarioFor(salePrice) {
     const proceeds = netProceeds(salePrice, balance);
-    const loanNeeded = Math.max(0, build - proceeds);
+    const loanNeeded = Math.max(0, build + extraCosts - proceeds);
     const principalInterest = loanNeeded > 0 ? monthlyPayment(loanNeeded, rate, term) : 0;
     const totalMonthly = principalInterest + propertyTax;
     return {
-      salePrice,
-      proceeds,
-      loanNeeded,
-      principalInterest,
-      propertyTax,
-      totalMonthly,
+      salePrice, proceeds, loanNeeded, principalInterest, propertyTax, totalMonthly,
       fullyCovered: loanNeeded <= 0,
     };
   }
 
   if (validPrices.length === 0) {
-    // No sale price entered → finance the whole build.
-    const pi = monthlyPayment(build, rate, term);
+    const loanNeeded = build + extraCosts;
+    const pi = monthlyPayment(loanNeeded, rate, term);
     return {
-      ready: true,
-      mode: 'no-sale',
-      term, rate, taxRate, propertyTax,
+      ready: true, mode: 'no-sale', term, rate, taxRate, propertyTax,
       scenario: {
-        loanNeeded: build,
-        principalInterest: pi,
-        propertyTax,
-        totalMonthly: pi + propertyTax,
+        loanNeeded, principalInterest: pi, propertyTax, totalMonthly: pi + propertyTax,
       },
     };
   }
 
   return {
-    ready: true,
-    mode: 'scenarios',
-    term, rate, taxRate, propertyTax,
+    ready: true, mode: 'scenarios', term, rate, taxRate, propertyTax,
     scenarios: validPrices.map(scenarioFor),
   };
 }
@@ -147,7 +159,15 @@ function renderSalePrices() {
     list._delegated = true;
     list.addEventListener('input', e => {
       if (!e.target.classList.contains('sale-price-input')) return;
-      state.salePrices[+e.target.dataset.idx] = e.target.value;
+      const raw = parseInput(e.target.value);
+      state.salePrices[+e.target.dataset.idx] = raw;
+      const formatted = fmtInput(raw);
+      const cursorFromEnd = e.target.value.length - (e.target.selectionEnd || 0);
+      e.target.value = formatted;
+      e.target.setSelectionRange(
+        Math.max(0, formatted.length - cursorFromEnd),
+        Math.max(0, formatted.length - cursorFromEnd),
+      );
       saveState();
       renderResults();
     });
@@ -169,8 +189,8 @@ function renderSalePrices() {
     row.innerHTML = `
       <div class="input-wrap has-prefix">
         <span class="input-prefix">$</span>
-        <input type="number" min="0" step="any" placeholder="e.g. 350000"
-          value="${price}" data-idx="${i}" class="sale-price-input" />
+        <input type="text" inputmode="numeric" placeholder="e.g. 350,000"
+          value="${fmtInput(price)}" data-idx="${i}" class="sale-price-input" />
       </div>
       <button class="btn-remove" data-idx="${i}" title="Remove">×</button>
     `;
@@ -213,12 +233,15 @@ function renderResults() {
         </div>
         <div class="big-number">${fmt(s.totalMonthly)}<span class="per-mo">/mo</span></div>
         <div class="big-sub">${taxNote}</div>
-        ${rowsHTML([
-          ['Loan amount', fmt(s.loanNeeded)],
-          ['Principal & interest', fmt(s.principalInterest) + '/mo'],
-          ['Property tax', fmt(s.propertyTax) + '/mo'],
-          ['Total monthly', fmt(s.totalMonthly) + '/mo', { total: true }],
-        ])}
+        <details class="scenario-details">
+          <summary>Show breakdown</summary>
+          ${rowsHTML([
+            ['Loan amount', fmt(s.loanNeeded)],
+            ['Principal & interest', fmt(s.principalInterest) + '/mo'],
+            ['Property tax', fmt(s.propertyTax) + '/mo'],
+            ['Total monthly', fmt(s.totalMonthly) + '/mo', { total: true }],
+          ])}
+        </details>
       </div>`;
     return;
   }
@@ -233,21 +256,41 @@ function renderResults() {
               ? 'Underwater by ' + fmt(Math.abs(s.proceeds))
               : fmt(s.proceeds) + ' net after payoff'}</span>
           </div>
-          <div class="big-number">${s.fullyCovered ? fmt(s.totalMonthly) : fmt(s.totalMonthly)}<span class="per-mo">/mo</span></div>
+          <div class="big-number">${fmt(s.totalMonthly)}<span class="per-mo">/mo</span></div>
           <div class="big-sub">${s.fullyCovered ? 'Build fully covered — tax only' : taxNote}</div>
-          ${rowsHTML([
-            ['Net sale proceeds', fmt(s.proceeds)],
-            ['Loan needed', fmt(s.loanNeeded)],
-            ['Principal & interest', s.principalInterest > 0 ? fmt(s.principalInterest) + '/mo' : '—'],
-            ['Property tax', fmt(s.propertyTax) + '/mo'],
-            ['Total monthly', fmt(s.totalMonthly) + '/mo', { total: true }],
-          ])}
+          <details class="scenario-details">
+            <summary>Show breakdown</summary>
+            ${rowsHTML([
+              ['Net sale proceeds', fmt(s.proceeds)],
+              ['Loan needed', fmt(s.loanNeeded)],
+              ['Principal & interest', s.principalInterest > 0 ? fmt(s.principalInterest) + '/mo' : '—'],
+              ['Property tax', fmt(s.propertyTax) + '/mo'],
+              ['Total monthly', fmt(s.totalMonthly) + '/mo', { total: true }],
+            ])}
+          </details>
         </div>
       `).join('')}
     </div>`;
 }
 
 // ── Wiring ──────────────────────────────────────────────────────────────────
+
+// Binds a text input to a dollar-amount state field with live comma formatting.
+// Preserves cursor position relative to end of input so editing feels natural.
+function bindDollarInput(el, getter, setter) {
+  el.value = fmtInput(getter());
+  el.addEventListener('input', e => {
+    const raw = parseInput(e.target.value);
+    const formatted = fmtInput(raw);
+    const cursorFromEnd = e.target.value.length - (e.target.selectionEnd || 0);
+    setter(raw);
+    e.target.value = formatted;
+    const newPos = Math.max(0, formatted.length - cursorFromEnd);
+    e.target.setSelectionRange(newPos, newPos);
+    saveState();
+    renderResults();
+  });
+}
 
 function populateStateSelect() {
   const sel = document.getElementById('stateSelect');
@@ -263,12 +306,11 @@ function init() {
   loadState();
   populateStateSelect();
 
-  const buildInput = document.getElementById('buildCost');
-  buildInput.value = state.buildCost;
-  buildInput.addEventListener('input', e => {
-    state.buildCost = e.target.value;
-    saveState(); renderResults();
-  });
+  bindDollarInput(
+    document.getElementById('buildCost'),
+    () => state.buildCost,
+    v => { state.buildCost = v; },
+  );
 
   const rateInput = document.getElementById('interestRate');
   rateInput.value = state.interestRate;
@@ -285,6 +327,18 @@ function init() {
     });
   });
   renderTermButtons();
+
+  bindDollarInput(
+    document.getElementById('sellingCosts'),
+    () => state.sellingCosts,
+    v => { state.sellingCosts = v; },
+  );
+
+  bindDollarInput(
+    document.getElementById('otherCosts'),
+    () => state.otherCosts,
+    v => { state.otherCosts = v; },
+  );
 
   const taxInput = document.getElementById('propertyTaxRate');
 
@@ -307,12 +361,11 @@ function init() {
     saveState(); renderResults();
   });
 
-  const balanceInput = document.getElementById('currentLoanBalance');
-  balanceInput.value = state.currentLoanBalance;
-  balanceInput.addEventListener('input', e => {
-    state.currentLoanBalance = e.target.value;
-    saveState(); renderResults();
-  });
+  bindDollarInput(
+    document.getElementById('currentLoanBalance'),
+    () => state.currentLoanBalance,
+    v => { state.currentLoanBalance = v; },
+  );
 
   document.getElementById('btnAddPrice').addEventListener('click', () => {
     state.salePrices.push('');
@@ -330,6 +383,7 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     STATE_TAX_RATES, STATE_NAMES, DEFAULT_STATE, DEFAULT_TAX_RATE,
     monthlyPayment, monthlyPropertyTax, netProceeds, computeProjection, fmt,
+    fmtInput, parseInput,
     renderResults, renderSalePrices,
     __setState: s => { state = s; },
     __getState: () => state,

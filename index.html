@@ -112,6 +112,33 @@
     .line-value { color: #2d3748; font-weight: 500; }
     .line-total { border-top: 1.5px solid #cbd5e0; margin-top: 0.25rem; }
     .line-total .line-label, .line-total .line-value { font-weight: 700; color: #2d3748; }
+
+    /* Collapsible additional-costs section */
+    details.additional-costs {
+      margin-top: 1.25rem; border: 1.5px dashed #e2e8f0; border-radius: 8px;
+      padding: 0.75rem 1rem;
+    }
+    details.additional-costs > summary,
+    details.scenario-details > summary {
+      cursor: pointer; list-style: none; user-select: none;
+    }
+    details.additional-costs > summary::-webkit-details-marker,
+    details.scenario-details > summary::-webkit-details-marker { display: none; }
+    details.additional-costs > summary {
+      font-size: 0.875rem; color: #718096; font-weight: 500;
+    }
+    details.additional-costs > summary:hover { color: #4299e1; }
+    details.additional-costs[open] > summary { margin-bottom: 1.25rem; }
+    .additional-costs-body { display: flex; flex-direction: column; gap: 1.25rem; }
+
+    /* Collapsible scenario breakdown */
+    details.scenario-details { margin-top: 0.6rem; }
+    details.scenario-details > summary {
+      font-size: 0.78rem; color: #a0aec0; padding: 0.2rem 0;
+    }
+    details.scenario-details > summary::before { content: '▸ '; }
+    details.scenario-details[open] > summary::before { content: '▾ '; }
+    details.scenario-details > summary:hover { color: #4299e1; }
   </style>
 </head>
 <body>
@@ -127,7 +154,7 @@
       <label for="buildCost">Total build cost</label>
       <div class="input-wrap has-prefix">
         <span class="input-prefix">$</span>
-        <input type="number" id="buildCost" min="0" step="any" placeholder="e.g. 500000" />
+        <input type="text" inputmode="numeric" id="buildCost" placeholder="e.g. 500,000" />
       </div>
     </div>
 
@@ -148,6 +175,26 @@
         </div>
       </div>
     </div>
+
+    <details class="additional-costs">
+      <summary>Additional costs <span class="hint">(selling costs, closing costs…)</span></summary>
+      <div class="additional-costs-body">
+        <div class="field">
+          <label for="sellingCosts">Selling costs <span class="hint">(realtor fees, closing on current home)</span></label>
+          <div class="input-wrap has-prefix">
+            <span class="input-prefix">$</span>
+            <input type="text" inputmode="numeric" id="sellingCosts" placeholder="e.g. 25,000" />
+          </div>
+        </div>
+        <div class="field" style="margin-bottom:0">
+          <label for="otherCosts">Other costs <span class="hint">(moving, contingency, landscaping…)</span></label>
+          <div class="input-wrap has-prefix">
+            <span class="input-prefix">$</span>
+            <input type="text" inputmode="numeric" id="otherCosts" placeholder="e.g. 10,000" />
+          </div>
+        </div>
+      </div>
+    </details>
   </div>
 
   <!-- Property tax -->
@@ -179,7 +226,7 @@
       <label for="currentLoanBalance">Remaining mortgage balance <span class="hint">(payoff at sale)</span></label>
       <div class="input-wrap has-prefix">
         <span class="input-prefix">$</span>
-        <input type="number" id="currentLoanBalance" min="0" step="any" placeholder="e.g. 150000" />
+        <input type="text" inputmode="numeric" id="currentLoanBalance" placeholder="e.g. 150,000" />
       </div>
     </div>
 

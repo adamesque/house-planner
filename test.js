@@ -5,6 +5,7 @@ const { JSDOM } = require('jsdom');
 const app = require('./app.js');
 const {
   monthlyPayment, monthlyPropertyTax, netProceeds, computeProjection, fmt,
+  fmtInput, parseInput,
   renderResults, renderSalePrices, STATE_TAX_RATES, STATE_NAMES,
   DEFAULT_STATE, DEFAULT_TAX_RATE,
   __setState,
@@ -142,12 +143,46 @@ describe('computeProjection', () => {
     assert.equal(p.scenarios[0].propertyTax, 500); // 600k * 1% / 12
   });
 
+  test('selling costs increase the loan needed', () => {
+    const p = computeProjection({
+      ...baseState({ buildCost: '500000', interestRate: '6', salePrices: ['200000'] }),
+      sellingCosts: '20000',
+    });
+    assert.equal(p.scenarios[0].loanNeeded, 320000); // 500k + 20k - 200k
+  });
+
+  test('other costs roll into the no-sale loan', () => {
+    const p = computeProjection({
+      ...baseState({ buildCost: '400000', interestRate: '6', salePrices: [] }),
+      sellingCosts: '30000', otherCosts: '20000',
+    });
+    assert.equal(p.scenario.loanNeeded, 450000); // 400k + 50k
+  });
+
+  test('additional costs do not affect property tax base', () => {
+    const p = computeProjection({
+      ...baseState({ buildCost: '500000', interestRate: '6', propertyTaxRate: '1.2', salePrices: [] }),
+      otherCosts: '50000',
+    });
+    assert.equal(p.scenario.propertyTax, 500); // 500k * 1.2% / 12, not 550k
+  });
+
   test('empty sale price strings fall back to no-sale mode', () => {
     const p = computeProjection(baseState({
       buildCost: '500000', interestRate: '6', salePrices: ['', ''],
     }));
     assert.equal(p.mode, 'no-sale');
   });
+});
+
+describe('fmtInput / parseInput', () => {
+  test('fmtInput adds commas', () => assert.equal(fmtInput('500000'), '500,000'));
+  test('fmtInput 1M', () => assert.equal(fmtInput('1000000'), '1,000,000'));
+  test('fmtInput already formatted', () => assert.equal(fmtInput('500,000'), '500,000'));
+  test('fmtInput empty string', () => assert.equal(fmtInput(''), ''));
+  test('parseInput strips commas', () => assert.equal(parseInput('500,000'), '500000'));
+  test('parseInput raw passthrough', () => assert.equal(parseInput('500000'), '500000'));
+  test('parseInput empty string', () => assert.equal(parseInput(''), ''));
 });
 
 describe('fmt', () => {
