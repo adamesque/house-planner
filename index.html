@@ -139,6 +139,14 @@
     details.scenario-details > summary::before { content: '▸ '; }
     details.scenario-details[open] > summary::before { content: '▾ '; }
     details.scenario-details > summary:hover { color: #4299e1; }
+
+    @media (max-width: 520px) {
+      body { padding: 1rem 0.625rem; }
+      .card { padding: 1.25rem 1rem; }
+      .field-row { flex-direction: column; gap: 0; }
+      .field-row .field { margin-bottom: 1.25rem; }
+      .field-row .field:last-child { margin-bottom: 0; }
+    }
   </style>
 </head>
 <body>
