@@ -32,6 +32,28 @@ function fmt(n) {
 
 function renderSalePrices() {
   const list = document.getElementById('salePricesList');
+
+  // Use event delegation on the stable parent so listeners survive re-renders
+  if (!list._delegated) {
+    list._delegated = true;
+    list.addEventListener('input', e => {
+      if (!e.target.classList.contains('sale-price-input')) return;
+      state.salePrices[+e.target.dataset.idx] = e.target.value;
+      saveState();
+      renderResults();
+    });
+    list.addEventListener('click', e => {
+      const btn = e.target.closest('.btn-remove');
+      if (!btn) return;
+      const idx = +btn.dataset.idx;
+      state.salePrices.splice(idx, 1);
+      if (state.salePrices.length === 0) state.salePrices = [''];
+      saveState();
+      renderSalePrices();
+      renderResults();
+    });
+  }
+
   list.innerHTML = '';
   state.salePrices.forEach((price, i) => {
     const row = document.createElement('div');
@@ -39,31 +61,12 @@ function renderSalePrices() {
     row.innerHTML = `
       <div class="input-wrap has-prefix">
         <span class="input-prefix">$</span>
-        <input type="number" min="0" step="1000" placeholder="350000"
+        <input type="number" min="0" step="any" placeholder="350000"
           value="${price}" data-idx="${i}" class="sale-price-input" />
       </div>
       <button class="btn-remove" data-idx="${i}" title="Remove">×</button>
     `;
     list.appendChild(row);
-  });
-
-  list.querySelectorAll('.sale-price-input').forEach(input => {
-    input.addEventListener('input', e => {
-      state.salePrices[+e.target.dataset.idx] = e.target.value;
-      saveState();
-      renderResults();
-    });
-  });
-
-  list.querySelectorAll('.btn-remove').forEach(btn => {
-    btn.addEventListener('click', e => {
-      const idx = +e.currentTarget.dataset.idx;
-      state.salePrices.splice(idx, 1);
-      if (state.salePrices.length === 0) state.salePrices = [''];
-      saveState();
-      renderSalePrices();
-      renderResults();
-    });
   });
 }
 
