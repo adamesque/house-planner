@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>House Sale Projector</title>
+  <title>Build &amp; Move Planner</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -18,23 +18,10 @@
       padding: 2rem 1rem;
     }
 
-    .container {
-      width: 100%;
-      max-width: 680px;
-    }
+    .container { width: 100%; max-width: 680px; }
 
-    h1 {
-      font-size: 1.5rem;
-      font-weight: 700;
-      margin-bottom: 0.25rem;
-      color: #2d3748;
-    }
-
-    .subtitle {
-      color: #718096;
-      font-size: 0.875rem;
-      margin-bottom: 2rem;
-    }
+    h1 { font-size: 1.5rem; font-weight: 700; margin-bottom: 0.25rem; color: #2d3748; }
+    .subtitle { color: #718096; font-size: 0.875rem; margin-bottom: 2rem; }
 
     .card {
       background: #fff;
@@ -45,237 +32,161 @@
     }
 
     .card h2 {
-      font-size: 0.75rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: #a0aec0;
-      margin-bottom: 1.25rem;
+      font-size: 0.75rem; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.08em; color: #a0aec0; margin-bottom: 1.25rem;
     }
 
-    .field {
-      margin-bottom: 1.25rem;
-    }
-
+    .field { margin-bottom: 1.25rem; }
     .field:last-child { margin-bottom: 0; }
+    .field-row { display: flex; gap: 1rem; }
+    .field-row .field { flex: 1; margin-bottom: 0; }
 
-    label {
-      display: block;
-      font-size: 0.875rem;
-      font-weight: 500;
-      color: #4a5568;
-      margin-bottom: 0.4rem;
+    label { display: block; font-size: 0.875rem; font-weight: 500; color: #4a5568; margin-bottom: 0.4rem; }
+    .hint { font-size: 0.75rem; color: #a0aec0; font-weight: 400; }
+
+    .input-wrap { position: relative; display: flex; align-items: center; }
+    .input-prefix, .input-suffix {
+      position: absolute; font-size: 0.9rem; color: #a0aec0; pointer-events: none; font-weight: 500;
     }
-
-    .input-wrap {
-      position: relative;
-      display: flex;
-      align-items: center;
-    }
-
-    .input-prefix,
-    .input-suffix {
-      position: absolute;
-      font-size: 0.9rem;
-      color: #a0aec0;
-      pointer-events: none;
-      font-weight: 500;
-    }
-
     .input-prefix { left: 0.75rem; }
     .input-suffix { right: 0.75rem; }
 
-    input[type="number"] {
-      width: 100%;
-      padding: 0.6rem 0.75rem;
-      border: 1.5px solid #e2e8f0;
-      border-radius: 8px;
-      font-size: 1rem;
-      color: #2d3748;
-      background: #f7fafc;
-      outline: none;
+    input[type="number"], select {
+      width: 100%; padding: 0.6rem 0.75rem; border: 1.5px solid #e2e8f0; border-radius: 8px;
+      font-size: 1rem; color: #2d3748; background: #f7fafc; outline: none;
       transition: border-color 0.15s, box-shadow 0.15s;
-      appearance: textfield;
-      -moz-appearance: textfield;
+      appearance: none; -moz-appearance: textfield;
     }
-
     input[type="number"]::-webkit-outer-spin-button,
     input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
-
-    input[type="number"]:focus {
-      border-color: #4299e1;
-      box-shadow: 0 0 0 3px rgba(66,153,225,0.15);
-      background: #fff;
+    input[type="number"]:focus, select:focus {
+      border-color: #4299e1; box-shadow: 0 0 0 3px rgba(66,153,225,0.15); background: #fff;
     }
-
+    select { cursor: pointer; }
     .has-prefix input { padding-left: 1.75rem; }
     .has-suffix input { padding-right: 2.25rem; }
 
-    /* Sale prices list */
+    /* Segmented term buttons */
+    .segmented { display: flex; gap: 0.5rem; }
+    .term-btn {
+      flex: 1; padding: 0.6rem 0; border: 1.5px solid #e2e8f0; border-radius: 8px;
+      background: #f7fafc; color: #4a5568; font-size: 0.95rem; font-weight: 600;
+      cursor: pointer; transition: all 0.15s;
+    }
+    .term-btn:hover { border-color: #4299e1; }
+    .term-btn.active { background: #4299e1; border-color: #4299e1; color: #fff; }
+
+    /* Sale prices */
     .sale-prices-list { display: flex; flex-direction: column; gap: 0.6rem; }
-
-    .sale-price-row {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
+    .sale-price-row { display: flex; align-items: center; gap: 0.5rem; }
     .sale-price-row .input-wrap { flex: 1; }
-
     .btn-remove {
-      flex-shrink: 0;
-      background: none;
-      border: none;
-      cursor: pointer;
-      color: #cbd5e0;
-      font-size: 1.1rem;
-      line-height: 1;
-      padding: 0.25rem;
-      border-radius: 4px;
-      transition: color 0.15s;
+      flex-shrink: 0; background: none; border: none; cursor: pointer; color: #cbd5e0;
+      font-size: 1.1rem; line-height: 1; padding: 0.25rem; border-radius: 4px; transition: color 0.15s;
     }
-
     .btn-remove:hover { color: #fc8181; }
-
     .btn-add {
-      margin-top: 0.75rem;
-      background: none;
-      border: 1.5px dashed #cbd5e0;
-      border-radius: 8px;
-      color: #718096;
-      font-size: 0.875rem;
-      cursor: pointer;
-      padding: 0.45rem 0.75rem;
-      width: 100%;
-      text-align: center;
-      transition: border-color 0.15s, color 0.15s;
+      margin-top: 0.75rem; background: none; border: 1.5px dashed #cbd5e0; border-radius: 8px;
+      color: #718096; font-size: 0.875rem; cursor: pointer; padding: 0.45rem 0.75rem;
+      width: 100%; text-align: center; transition: border-color 0.15s, color 0.15s;
     }
-
     .btn-add:hover { border-color: #4299e1; color: #4299e1; }
 
-    /* Loan term slider */
-    .term-row {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-    }
-
-    input[type="range"] {
-      flex: 1;
-      accent-color: #4299e1;
-      cursor: pointer;
-    }
-
-    .term-value {
-      font-size: 0.95rem;
-      font-weight: 600;
-      color: #2d3748;
-      min-width: 5rem;
-      text-align: right;
-    }
-
     /* Results */
-    .results-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1rem;
-    }
+    .no-sale-msg { color: #a0aec0; font-size: 0.875rem; text-align: center; padding: 1rem 0; }
+    .sale-scenarios { display: flex; flex-direction: column; gap: 1rem; }
 
-    @media (max-width: 480px) { .results-grid { grid-template-columns: 1fr; } }
+    .scenario-card { border: 1.5px solid #e2e8f0; border-radius: 10px; padding: 1.25rem; }
+    .scenario-card.single { border-color: #bee3f8; background: linear-gradient(135deg, #ebf8ff, #f7fffd); }
 
-    .result-item {
-      background: #f7fafc;
-      border-radius: 8px;
-      padding: 1rem;
-    }
+    .card-head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 0.25rem; margin-bottom: 0.75rem; }
+    .card-title { font-size: 0.95rem; font-weight: 700; color: #2d3748; }
+    .card-sub { font-size: 0.8rem; color: #718096; }
 
-    .result-item.highlight {
-      background: linear-gradient(135deg, #ebf8ff, #e6fffa);
-      border: 1.5px solid #bee3f8;
-    }
+    .big-number { font-size: 2rem; font-weight: 700; color: #2b6cb0; line-height: 1; }
+    .per-mo { font-size: 1rem; font-weight: 500; color: #a0aec0; margin-left: 0.15rem; }
+    .big-sub { font-size: 0.78rem; color: #a0aec0; margin-top: 0.25rem; margin-bottom: 0.75rem; }
 
-    .result-label {
-      font-size: 0.75rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      color: #a0aec0;
-      margin-bottom: 0.4rem;
-    }
-
-    .result-value {
-      font-size: 1.5rem;
-      font-weight: 700;
-      color: #2d3748;
-    }
-
-    .result-item.highlight .result-value { color: #2b6cb0; }
-
-    .result-sub {
-      font-size: 0.8rem;
-      color: #718096;
-      margin-top: 0.2rem;
-    }
-
-    .no-sale-msg {
-      color: #a0aec0;
-      font-size: 0.875rem;
-      text-align: center;
-      padding: 1rem 0;
-    }
-
-    .sale-scenarios { display: flex; flex-direction: column; gap: 0.75rem; }
-
-    .scenario-card {
-      border: 1.5px solid #e2e8f0;
-      border-radius: 8px;
-      padding: 1rem;
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      gap: 0.5rem;
-    }
-
-    .scenario-card .result-value { font-size: 1.1rem; }
+    .line { display: flex; justify-content: space-between; padding: 0.4rem 0; font-size: 0.875rem; border-top: 1px solid #edf2f7; }
+    .line-label { color: #718096; }
+    .line-value { color: #2d3748; font-weight: 500; }
+    .line-total { border-top: 1.5px solid #cbd5e0; margin-top: 0.25rem; }
+    .line-total .line-label, .line-total .line-value { font-weight: 700; color: #2d3748; }
   </style>
 </head>
 <body>
 <div class="container">
-  <h1>House Sale Projector</h1>
-  <p class="subtitle">Estimate monthly mortgage payments based on your build cost and home sale scenarios.</p>
+  <h1>Build &amp; Move Planner</h1>
+  <p class="subtitle">Estimate the monthly cost of building a new home while selling your current one.</p>
 
-  <!-- Build Cost -->
+  <!-- New build -->
   <div class="card">
-    <h2>New Build</h2>
+    <h2>Your New Build</h2>
+
     <div class="field">
       <label for="buildCost">Total build cost</label>
       <div class="input-wrap has-prefix">
         <span class="input-prefix">$</span>
-        <input type="number" id="buildCost" min="0" step="1000" placeholder="500000" />
+        <input type="number" id="buildCost" min="0" step="any" placeholder="e.g. 500000" />
       </div>
     </div>
 
-    <div class="field">
-      <label>Loan term</label>
-      <div class="term-row">
-        <input type="range" id="loanTerm" min="5" max="30" step="5" value="30" />
-        <span class="term-value"><span id="loanTermDisplay">30</span> years</span>
+    <div class="field-row">
+      <div class="field">
+        <label for="interestRate">Interest rate</label>
+        <div class="input-wrap has-suffix">
+          <input type="number" id="interestRate" min="0" max="30" step="any" placeholder="e.g. 6.75" />
+          <span class="input-suffix">%</span>
+        </div>
       </div>
-    </div>
-
-    <div class="field">
-      <label for="interestRate">Annual interest rate</label>
-      <div class="input-wrap has-suffix">
-        <input type="number" id="interestRate" min="0" max="30" step="0.05" placeholder="6.75" />
-        <span class="input-suffix">%</span>
+      <div class="field">
+        <label>Loan term</label>
+        <div class="segmented">
+          <button type="button" class="term-btn" data-term="15">15 yr</button>
+          <button type="button" class="term-btn" data-term="20">20 yr</button>
+          <button type="button" class="term-btn" data-term="30">30 yr</button>
+        </div>
       </div>
     </div>
   </div>
 
-  <!-- Current House Sale Prices -->
+  <!-- Property tax -->
   <div class="card">
-    <h2>Current House — Possible Sale Prices</h2>
-    <div class="sale-prices-list" id="salePricesList"></div>
-    <button class="btn-add" id="btnAddPrice">+ Add scenario</button>
+    <h2>Property Tax</h2>
+    <div class="field-row">
+      <div class="field">
+        <label for="stateSelect">State</label>
+        <select id="stateSelect">
+          <option value="">Select a state…</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="propertyTaxRate">Annual rate <span class="hint">(editable)</span></label>
+        <div class="input-wrap has-suffix">
+          <input type="number" id="propertyTaxRate" min="0" max="10" step="any" placeholder="e.g. 1.2" />
+          <span class="input-suffix">%</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Current home -->
+  <div class="card">
+    <h2>Your Current Home</h2>
+
+    <div class="field">
+      <label for="currentLoanBalance">Remaining mortgage balance <span class="hint">(payoff at sale)</span></label>
+      <div class="input-wrap has-prefix">
+        <span class="input-prefix">$</span>
+        <input type="number" id="currentLoanBalance" min="0" step="any" placeholder="e.g. 150000" />
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Possible sale prices</label>
+      <div class="sale-prices-list" id="salePricesList"></div>
+      <button class="btn-add" id="btnAddPrice">+ Add another sale price</button>
+    </div>
   </div>
 
   <!-- Results -->

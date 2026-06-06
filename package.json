@@ -2,7 +2,6 @@
   "name": "house-planner",
   "version": "1.0.0",
   "description": "",
-  "type": "module",
   "scripts": {
     "test": "node --test test.js"
   },

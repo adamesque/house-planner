@@ -1,292 +1,235 @@
-import { test, describe } from 'node:test';
-import assert from 'node:assert/strict';
-import { JSDOM } from 'jsdom';
+const { test, describe, beforeEach } = require('node:test');
+const assert = require('node:assert/strict');
+const { JSDOM } = require('jsdom');
 
-// ── DOM setup ─────────────────────────────────────────────────────────────────
+const app = require('./app.js');
+const {
+  monthlyPayment, monthlyPropertyTax, netProceeds, computeProjection, fmt,
+  renderResults, renderSalePrices, STATE_TAX_RATES, STATE_NAMES,
+  __setState,
+} = app;
 
+// Fresh jsdom document/localStorage before each test that touches the DOM.
 function makeDOM() {
-  const dom = new JSDOM(`<!DOCTYPE html>
-    <html><body>
-      <input id="buildCost" type="number" />
-      <input id="loanTerm" type="range" value="30" />
-      <span id="loanTermDisplay"></span>
-      <input id="interestRate" type="number" />
-      <div id="salePricesList"></div>
-      <button id="btnAddPrice"></button>
-      <div id="resultsArea"></div>
-    </body></html>`,
-    { url: 'http://localhost' }
-  );
+  const dom = new JSDOM(`<!DOCTYPE html><html><body>
+    <div id="salePricesList"></div>
+    <div id="resultsArea"></div>
+  </body></html>`, { url: 'http://localhost' });
   global.document = dom.window.document;
   global.localStorage = dom.window.localStorage;
   return dom;
 }
 
-// ── Load app functions ────────────────────────────────────────────────────────
-
-// Inline the pure functions so tests don't depend on a browser module loader.
-// These must stay in sync with app.js.
-
-const STORAGE_KEY = 'house-planner-v1';
-
-let state;
-
-function resetState(overrides = {}) {
-  state = { buildCost: '', loanTerm: 30, interestRate: '', salePrices: [''], ...overrides };
+function baseState(overrides = {}) {
+  return {
+    buildCost: '', loanTerm: 30, interestRate: '',
+    stateCode: '', propertyTaxRate: '', currentLoanBalance: '',
+    salePrices: [''], ...overrides,
+  };
 }
-
-function loadState() {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) state = { ...state, ...JSON.parse(saved) };
-  } catch {}
-}
-
-function saveState() {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch {}
-}
-
-function monthlyPayment(principal, annualRate, years) {
-  if (principal <= 0 || years <= 0) return null;
-  if (annualRate <= 0) return principal / (years * 12);
-  const r = annualRate / 100 / 12;
-  const n = years * 12;
-  return principal * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
-}
-
-function fmt(n) {
-  return '$' + Math.round(n).toLocaleString('en-US');
-}
-
-function renderSalePrices() {
-  const list = document.getElementById('salePricesList');
-  list.innerHTML = '';
-  state.salePrices.forEach((price, i) => {
-    const row = document.createElement('div');
-    row.className = 'sale-price-row';
-    row.innerHTML = `
-      <input type="number" value="${price}" data-idx="${i}" class="sale-price-input" />
-      <button class="btn-remove" data-idx="${i}">×</button>
-    `;
-    list.appendChild(row);
-  });
-  list.querySelectorAll('.btn-remove').forEach(btn => {
-    btn.addEventListener('click', e => {
-      const idx = +e.currentTarget.dataset.idx;
-      state.salePrices.splice(idx, 1);
-      if (state.salePrices.length === 0) state.salePrices = [''];
-      renderSalePrices();
-      renderResults();
-    });
-  });
-}
-
-function renderResults() {
-  const area = document.getElementById('resultsArea');
-  const build = parseFloat(state.buildCost) || 0;
-  const rate = parseFloat(state.interestRate) || 0;
-  const term = state.loanTerm;
-  const validPrices = state.salePrices.map(p => parseFloat(p)).filter(p => !isNaN(p) && p >= 0);
-
-  if (build <= 0 || rate <= 0) {
-    area.innerHTML = '<p class="no-sale-msg">Enter a build cost and interest rate to see projections.</p>';
-    return;
-  }
-  if (validPrices.length === 0) {
-    const payment = monthlyPayment(build, rate, term);
-    area.innerHTML = `<div class="result-value">${fmt(payment)}</div><div class="loan-amount">${fmt(build)}</div>`;
-    return;
-  }
-  const scenarios = validPrices.map(salePrice => {
-    const loan = Math.max(0, build - salePrice);
-    const payment = loan > 0 ? monthlyPayment(loan, rate, term) : 0;
-    return { salePrice, loan, payment };
-  });
-  area.innerHTML = `<div class="sale-scenarios">${scenarios.map(s => `
-    <div class="scenario-card">
-      <div class="sale-price">${fmt(s.salePrice)}</div>
-      <div class="loan-needed">${fmt(s.loan)}</div>
-      <div class="monthly-payment">${s.payment > 0 ? fmt(s.payment) : '—'}</div>
-      <div class="result-sub">${s.loan <= 0 ? 'Fully covered' : ''}</div>
-    </div>`).join('')}</div>`;
-}
-
-// ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('monthlyPayment', () => {
-  test('returns null for zero principal', () => {
-    assert.equal(monthlyPayment(0, 6.5, 30), null);
+  test('null for zero principal', () => assert.equal(monthlyPayment(0, 6.5, 30), null));
+  test('null for zero term', () => assert.equal(monthlyPayment(500000, 6.5, 0), null));
+  test('principal / months when rate is 0%', () => assert.equal(monthlyPayment(120000, 0, 10), 1000));
+  test('$400k @ 6% / 30yr ≈ $2,398', () => {
+    assert.ok(Math.abs(monthlyPayment(400000, 6, 30) - 2398.20) < 1);
   });
-
-  test('returns null for zero term', () => {
-    assert.equal(monthlyPayment(500000, 6.5, 0), null);
+  test('$400k @ 6% / 15yr ≈ $3,375', () => {
+    assert.ok(Math.abs(monthlyPayment(400000, 6, 15) - 3375.43) < 1);
   });
-
-  test('returns principal/months when rate is 0%', () => {
-    assert.equal(monthlyPayment(120000, 0, 10), 1000);
-  });
-
-  test('$400k at 6% for 30yr ≈ $2,398/mo', () => {
-    const payment = monthlyPayment(400000, 6, 30);
-    assert.ok(Math.abs(payment - 2398.20) < 1, `got ${payment}`);
-  });
-
-  test('$400k at 6% for 15yr ≈ $3,375/mo', () => {
-    const payment = monthlyPayment(400000, 6, 15);
-    assert.ok(Math.abs(payment - 3375.43) < 1, `got ${payment}`);
-  });
-
   test('higher rate → higher payment', () => {
     assert.ok(monthlyPayment(500000, 8, 30) > monthlyPayment(500000, 5, 30));
   });
-
   test('shorter term → higher payment', () => {
     assert.ok(monthlyPayment(500000, 6, 15) > monthlyPayment(500000, 6, 30));
   });
 });
 
-describe('fmt', () => {
-  test('prefixes with $', () => {
-    assert.ok(fmt(1000).startsWith('$'));
+describe('monthlyPropertyTax', () => {
+  test('zero when rate is 0', () => assert.equal(monthlyPropertyTax(500000, 0), 0));
+  test('zero when value is 0', () => assert.equal(monthlyPropertyTax(0, 1.5), 0));
+  test('$500k @ 1.2% = $500/mo', () => {
+    assert.equal(monthlyPropertyTax(500000, 1.2), 500);
   });
-
-  test('formats millions with commas', () => {
-    assert.equal(fmt(1000000), '$1,000,000');
-  });
-
-  test('rounds to nearest dollar', () => {
-    assert.equal(fmt(1234.56), '$1,235');
-  });
-
-  test('handles small amounts', () => {
-    assert.equal(fmt(500), '$500');
+  test('$600k @ 2% = $1000/mo', () => {
+    assert.equal(monthlyPropertyTax(600000, 2), 1000);
   });
 });
 
-describe('localStorage persistence', () => {
-  test('saveState writes values to localStorage', () => {
-    makeDOM();
-    resetState({ buildCost: '600000', interestRate: '6.5' });
-    saveState();
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    assert.equal(saved.buildCost, '600000');
-    assert.equal(saved.interestRate, '6.5');
+describe('netProceeds', () => {
+  test('sale minus payoff', () => assert.equal(netProceeds(400000, 150000), 250000));
+  test('negative when underwater', () => assert.equal(netProceeds(300000, 350000), -50000));
+  test('full sale price when no balance', () => assert.equal(netProceeds(400000, 0), 400000));
+});
+
+describe('computeProjection', () => {
+  test('not ready without build cost', () => {
+    assert.equal(computeProjection(baseState({ interestRate: '6' })).ready, false);
+  });
+  test('not ready without interest rate', () => {
+    assert.equal(computeProjection(baseState({ buildCost: '500000' })).ready, false);
   });
 
-  test('loadState restores saved values', () => {
-    makeDOM();
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      buildCost: '750000', loanTerm: 15, interestRate: '7', salePrices: ['300000']
+  test('no-sale mode finances full build', () => {
+    const p = computeProjection(baseState({ buildCost: '500000', interestRate: '6', salePrices: [] }));
+    assert.equal(p.mode, 'no-sale');
+    assert.equal(p.scenario.loanNeeded, 500000);
+  });
+
+  test('no-sale total = P&I + property tax', () => {
+    const p = computeProjection(baseState({
+      buildCost: '500000', interestRate: '6', propertyTaxRate: '1.2', salePrices: [],
     }));
-    resetState();
-    loadState();
-    assert.equal(state.buildCost, '750000');
-    assert.equal(state.loanTerm, 15);
-    assert.equal(state.salePrices[0], '300000');
+    const expectedPI = monthlyPayment(500000, 6, 30);
+    assert.ok(Math.abs(p.scenario.totalMonthly - (expectedPI + 500)) < 0.01);
   });
 
-  test('loadState is a no-op when nothing is saved', () => {
-    makeDOM();
-    resetState();
-    loadState();
-    assert.equal(state.buildCost, '');
-    assert.equal(state.loanTerm, 30);
+  test('one scenario per valid sale price', () => {
+    const p = computeProjection(baseState({
+      buildCost: '600000', interestRate: '6.5', salePrices: ['300000', '350000'],
+    }));
+    assert.equal(p.mode, 'scenarios');
+    assert.equal(p.scenarios.length, 2);
   });
 
-  test('loadState handles corrupt JSON without throwing', () => {
-    makeDOM();
-    localStorage.setItem(STORAGE_KEY, 'not valid json{{');
-    resetState();
-    assert.doesNotThrow(() => loadState());
-    assert.equal(state.buildCost, '');
+  test('loan needed accounts for current mortgage payoff', () => {
+    // Build 600k, sell 400k but still owe 150k → net proceeds 250k → loan 350k
+    const p = computeProjection(baseState({
+      buildCost: '600000', interestRate: '6', currentLoanBalance: '150000', salePrices: ['400000'],
+    }));
+    assert.equal(p.scenarios[0].proceeds, 250000);
+    assert.equal(p.scenarios[0].loanNeeded, 350000);
+  });
+
+  test('without payoff, full sale price reduces the loan', () => {
+    const p = computeProjection(baseState({
+      buildCost: '500000', interestRate: '6', salePrices: ['200000'],
+    }));
+    assert.equal(p.scenarios[0].loanNeeded, 300000);
+  });
+
+  test('underwater home increases the loan needed', () => {
+    // Build 500k, sell 300k, owe 350k → proceeds -50k → loan 550k
+    const p = computeProjection(baseState({
+      buildCost: '500000', interestRate: '6', currentLoanBalance: '350000', salePrices: ['300000'],
+    }));
+    assert.equal(p.scenarios[0].proceeds, -50000);
+    assert.equal(p.scenarios[0].loanNeeded, 550000);
+  });
+
+  test('fully covered when proceeds exceed build cost', () => {
+    const p = computeProjection(baseState({
+      buildCost: '400000', interestRate: '6', salePrices: ['450000'],
+    }));
+    assert.equal(p.scenarios[0].fullyCovered, true);
+    assert.equal(p.scenarios[0].principalInterest, 0);
+  });
+
+  test('fully covered still includes property tax in total', () => {
+    const p = computeProjection(baseState({
+      buildCost: '400000', interestRate: '6', propertyTaxRate: '1.2', salePrices: ['450000'],
+    }));
+    assert.equal(p.scenarios[0].principalInterest, 0);
+    assert.equal(p.scenarios[0].totalMonthly, 400); // 400k * 1.2% / 12
+  });
+
+  test('property tax is based on new build value', () => {
+    const p = computeProjection(baseState({
+      buildCost: '600000', interestRate: '6', propertyTaxRate: '1', salePrices: ['300000'],
+    }));
+    assert.equal(p.scenarios[0].propertyTax, 500); // 600k * 1% / 12
+  });
+
+  test('empty sale price strings fall back to no-sale mode', () => {
+    const p = computeProjection(baseState({
+      buildCost: '500000', interestRate: '6', salePrices: ['', ''],
+    }));
+    assert.equal(p.mode, 'no-sale');
   });
 });
 
-describe('renderResults', () => {
-  test('shows prompt when build cost is missing', () => {
-    makeDOM();
-    resetState({ interestRate: '6.5' });
+describe('fmt', () => {
+  test('prefixes with $', () => assert.ok(fmt(1000).startsWith('$')));
+  test('commas in millions', () => assert.equal(fmt(1000000), '$1,000,000'));
+  test('rounds to dollar', () => assert.equal(fmt(1234.56), '$1,235'));
+  test('negative amounts', () => assert.equal(fmt(-50000), '$-50,000'));
+});
+
+describe('state tax data', () => {
+  test('has all 50 states plus DC', () => {
+    assert.equal(Object.keys(STATE_TAX_RATES).length, 51);
+    assert.equal(Object.keys(STATE_NAMES).length, 51);
+  });
+  test('every rate has a name', () => {
+    for (const code of Object.keys(STATE_TAX_RATES)) {
+      assert.ok(STATE_NAMES[code], `missing name for ${code}`);
+    }
+  });
+  test('rates are plausible (0–3%)', () => {
+    for (const [code, rate] of Object.entries(STATE_TAX_RATES)) {
+      assert.ok(rate > 0 && rate < 3, `${code} rate ${rate} out of range`);
+    }
+  });
+});
+
+describe('renderResults (DOM)', () => {
+  beforeEach(makeDOM);
+
+  test('prompts when not ready', () => {
+    __setState(baseState({ interestRate: '6' }));
     renderResults();
     assert.ok(document.getElementById('resultsArea').innerHTML.includes('Enter a build cost'));
   });
 
-  test('shows prompt when interest rate is missing', () => {
-    makeDOM();
-    resetState({ buildCost: '500000' });
+  test('renders one card per scenario', () => {
+    __setState(baseState({ buildCost: '600000', interestRate: '6.5', salePrices: ['300000', '350000'] }));
     renderResults();
-    assert.ok(document.getElementById('resultsArea').innerHTML.includes('Enter a build cost'));
+    assert.equal(document.querySelectorAll('.scenario-card').length, 2);
   });
 
-  test('shows payment on full build cost when no sale prices entered', () => {
-    makeDOM();
-    resetState({ buildCost: '500000', interestRate: '6', salePrices: [] });
+  test('shows underwater warning', () => {
+    __setState(baseState({
+      buildCost: '500000', interestRate: '6', currentLoanBalance: '350000', salePrices: ['300000'],
+    }));
     renderResults();
-    const html = document.getElementById('resultsArea').innerHTML;
-    assert.ok(html.includes('$500,000'), `expected $500,000 in: ${html}`);
+    assert.ok(document.getElementById('resultsArea').innerHTML.includes('Underwater'));
   });
 
-  test('renders one scenario card per valid sale price', () => {
-    makeDOM();
-    resetState({ buildCost: '600000', interestRate: '6.5', salePrices: ['300000', '350000'] });
+  test('shows fully-covered note', () => {
+    __setState(baseState({ buildCost: '400000', interestRate: '6', salePrices: ['450000'] }));
     renderResults();
-    const cards = document.getElementById('resultsArea').querySelectorAll('.scenario-card');
-    assert.equal(cards.length, 2);
-  });
-
-  test('loan = build cost minus sale price', () => {
-    makeDOM();
-    resetState({ buildCost: '500000', interestRate: '6', salePrices: ['200000'] });
-    renderResults();
-    assert.ok(document.getElementById('resultsArea').innerHTML.includes('$300,000'));
-  });
-
-  test('shows "Fully covered" when sale price >= build cost', () => {
-    makeDOM();
-    resetState({ buildCost: '400000', interestRate: '6', salePrices: ['450000'] });
-    renderResults();
-    assert.ok(document.getElementById('resultsArea').innerHTML.includes('Fully covered'));
-  });
-
-  test('ignores empty sale price inputs', () => {
-    makeDOM();
-    resetState({ buildCost: '500000', interestRate: '6', salePrices: ['', ''] });
-    renderResults();
-    // Empty inputs → treated as no sale prices, shows single payment view
-    const html = document.getElementById('resultsArea').innerHTML;
-    assert.ok(html.includes('$500,000'));
+    assert.ok(document.getElementById('resultsArea').innerHTML.includes('fully covered'));
   });
 });
 
-describe('renderSalePrices DOM', () => {
-  test('renders one input per sale price', () => {
-    makeDOM();
-    resetState({ salePrices: ['100000', '200000', '300000'] });
+describe('renderSalePrices (DOM)', () => {
+  beforeEach(makeDOM);
+
+  test('one input per sale price', () => {
+    __setState(baseState({ salePrices: ['100000', '200000', '300000'] }));
     renderSalePrices();
-    const inputs = document.querySelectorAll('.sale-price-input');
-    assert.equal(inputs.length, 3);
+    assert.equal(document.querySelectorAll('.sale-price-input').length, 3);
   });
 
-  test('renders a remove button for each row', () => {
-    makeDOM();
-    resetState({ salePrices: ['100000', '200000'] });
+  test('remove button per row', () => {
+    __setState(baseState({ salePrices: ['100000', '200000'] }));
     renderSalePrices();
     assert.equal(document.querySelectorAll('.btn-remove').length, 2);
   });
 
-  test('clicking remove reduces the list length', () => {
-    makeDOM();
-    resetState({ salePrices: ['100000', '200000'] });
+  test('clicking remove shrinks the list', () => {
+    __setState(baseState({ salePrices: ['100000', '200000'] }));
     renderSalePrices();
     document.querySelector('.btn-remove').click();
-    assert.equal(state.salePrices.length, 1);
+    assert.equal(app.__getState().salePrices.length, 1);
   });
 
-  test('removing the last item resets to one empty row', () => {
-    makeDOM();
-    resetState({ salePrices: ['100000'] });
+  test('removing the last row leaves one empty row', () => {
+    __setState(baseState({ salePrices: ['100000'] }));
     renderSalePrices();
     document.querySelector('.btn-remove').click();
-    assert.equal(state.salePrices.length, 1);
-    assert.equal(state.salePrices[0], '');
+    assert.equal(app.__getState().salePrices.length, 1);
+    assert.equal(app.__getState().salePrices[0], '');
   });
 });

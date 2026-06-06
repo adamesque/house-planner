@@ -1,9 +1,41 @@
-const STORAGE_KEY = 'house-planner-v1';
+const STORAGE_KEY = 'house-planner-v2';
+
+// Average effective property tax rates by US state (% of home value / year).
+// Source: Tax Foundation / U.S. Census ACS 2024. These are statewide averages
+// and are meant as editable starting points — local rates vary by county/city.
+const STATE_TAX_RATES = {
+  AL: 0.41, AK: 1.04, AZ: 0.45, AR: 0.64, CA: 0.71, CO: 0.51, CT: 1.54,
+  DE: 0.58, DC: 0.55, FL: 0.79, GA: 0.81, HI: 0.27, ID: 0.49, IL: 1.88,
+  IN: 0.71, IA: 1.40, KS: 1.26, KY: 0.74, LA: 0.55, ME: 1.09, MD: 0.95,
+  MA: 1.04, MI: 1.24, MN: 0.98, MS: 0.67, MO: 0.91, MT: 0.69, NE: 1.38,
+  NV: 0.48, NH: 1.50, NJ: 2.23, NM: 0.67, NY: 1.54, NC: 0.63, ND: 0.98,
+  OH: 1.30, OK: 0.76, OR: 0.77, PA: 1.26, RI: 1.23, SC: 0.46, SD: 1.01,
+  TN: 0.48, TX: 1.40, UT: 0.47, VT: 1.51, VA: 0.72, WA: 0.76, WV: 0.55,
+  WI: 1.38, WY: 0.55,
+};
+
+const STATE_NAMES = {
+  AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California',
+  CO: 'Colorado', CT: 'Connecticut', DE: 'Delaware', DC: 'District of Columbia',
+  FL: 'Florida', GA: 'Georgia', HI: 'Hawaii', ID: 'Idaho', IL: 'Illinois',
+  IN: 'Indiana', IA: 'Iowa', KS: 'Kansas', KY: 'Kentucky', LA: 'Louisiana',
+  ME: 'Maine', MD: 'Maryland', MA: 'Massachusetts', MI: 'Michigan',
+  MN: 'Minnesota', MS: 'Mississippi', MO: 'Missouri', MT: 'Montana',
+  NE: 'Nebraska', NV: 'Nevada', NH: 'New Hampshire', NJ: 'New Jersey',
+  NM: 'New Mexico', NY: 'New York', NC: 'North Carolina', ND: 'North Dakota',
+  OH: 'Ohio', OK: 'Oklahoma', OR: 'Oregon', PA: 'Pennsylvania',
+  RI: 'Rhode Island', SC: 'South Carolina', SD: 'South Dakota',
+  TN: 'Tennessee', TX: 'Texas', UT: 'Utah', VT: 'Vermont', VA: 'Virginia',
+  WA: 'Washington', WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming',
+};
 
 let state = {
   buildCost: '',
   loanTerm: 30,
   interestRate: '',
+  stateCode: '',
+  propertyTaxRate: '',
+  currentLoanBalance: '',
   salePrices: [''],
 };
 
@@ -18,6 +50,8 @@ function saveState() {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch {}
 }
 
+// ── Pure calculation helpers ────────────────────────────────────────────────
+
 function monthlyPayment(principal, annualRate, years) {
   if (principal <= 0 || years <= 0) return null;
   if (annualRate <= 0) return principal / (years * 12);
@@ -26,14 +60,85 @@ function monthlyPayment(principal, annualRate, years) {
   return principal * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
 }
 
+function monthlyPropertyTax(homeValue, annualRatePercent) {
+  if (homeValue <= 0 || annualRatePercent <= 0) return 0;
+  return homeValue * (annualRatePercent / 100) / 12;
+}
+
+// Cash left from selling the current home after paying off its mortgage.
+// Can be negative if the home is underwater (owe more than it sells for).
+function netProceeds(salePrice, currentLoanBalance) {
+  return salePrice - currentLoanBalance;
+}
+
+// Builds the full projection from raw (string) form state. Pure: no DOM.
+function computeProjection(s) {
+  const build = parseFloat(s.buildCost) || 0;
+  const rate = parseFloat(s.interestRate) || 0;
+  const term = Number(s.loanTerm) || 0;
+  const taxRate = parseFloat(s.propertyTaxRate) || 0;
+  const balance = parseFloat(s.currentLoanBalance) || 0;
+
+  if (build <= 0 || rate <= 0) {
+    return { ready: false };
+  }
+
+  const propertyTax = monthlyPropertyTax(build, taxRate);
+
+  const validPrices = (s.salePrices || [])
+    .map(p => parseFloat(p))
+    .filter(p => !isNaN(p) && p >= 0);
+
+  function scenarioFor(salePrice) {
+    const proceeds = netProceeds(salePrice, balance);
+    const loanNeeded = Math.max(0, build - proceeds);
+    const principalInterest = loanNeeded > 0 ? monthlyPayment(loanNeeded, rate, term) : 0;
+    const totalMonthly = principalInterest + propertyTax;
+    return {
+      salePrice,
+      proceeds,
+      loanNeeded,
+      principalInterest,
+      propertyTax,
+      totalMonthly,
+      fullyCovered: loanNeeded <= 0,
+    };
+  }
+
+  if (validPrices.length === 0) {
+    // No sale price entered → finance the whole build.
+    const pi = monthlyPayment(build, rate, term);
+    return {
+      ready: true,
+      mode: 'no-sale',
+      term, rate, taxRate, propertyTax,
+      scenario: {
+        loanNeeded: build,
+        principalInterest: pi,
+        propertyTax,
+        totalMonthly: pi + propertyTax,
+      },
+    };
+  }
+
+  return {
+    ready: true,
+    mode: 'scenarios',
+    term, rate, taxRate, propertyTax,
+    scenarios: validPrices.map(scenarioFor),
+  };
+}
+
 function fmt(n) {
   return '$' + Math.round(n).toLocaleString('en-US');
 }
 
+// ── Rendering ───────────────────────────────────────────────────────────────
+
 function renderSalePrices() {
   const list = document.getElementById('salePricesList');
 
-  // Use event delegation on the stable parent so listeners survive re-renders
+  // Event delegation on the stable parent so listeners survive re-renders.
   if (!list._delegated) {
     list._delegated = true;
     list.addEventListener('input', e => {
@@ -45,8 +150,7 @@ function renderSalePrices() {
     list.addEventListener('click', e => {
       const btn = e.target.closest('.btn-remove');
       if (!btn) return;
-      const idx = +btn.dataset.idx;
-      state.salePrices.splice(idx, 1);
+      state.salePrices.splice(+btn.dataset.idx, 1);
       if (state.salePrices.length === 0) state.salePrices = [''];
       saveState();
       renderSalePrices();
@@ -61,7 +165,7 @@ function renderSalePrices() {
     row.innerHTML = `
       <div class="input-wrap has-prefix">
         <span class="input-prefix">$</span>
-        <input type="number" min="0" step="any" placeholder="350000"
+        <input type="number" min="0" step="any" placeholder="e.g. 350000"
           value="${price}" data-idx="${i}" class="sale-price-input" />
       </div>
       <button class="btn-remove" data-idx="${i}" title="Remove">×</button>
@@ -70,70 +174,90 @@ function renderSalePrices() {
   });
 }
 
+function renderTermButtons() {
+  document.querySelectorAll('.term-btn').forEach(btn => {
+    btn.classList.toggle('active', Number(btn.dataset.term) === Number(state.loanTerm));
+  });
+}
+
+function rowsHTML(rows) {
+  return rows.map(([label, value, opts = {}]) => `
+    <div class="line ${opts.total ? 'line-total' : ''}">
+      <span class="line-label">${label}</span>
+      <span class="line-value">${value}</span>
+    </div>`).join('');
+}
+
 function renderResults() {
   const area = document.getElementById('resultsArea');
-  const build = parseFloat(state.buildCost) || 0;
-  const rate = parseFloat(state.interestRate) || 0;
-  const term = state.loanTerm;
+  const p = computeProjection(state);
 
-  const validPrices = state.salePrices
-    .map(p => parseFloat(p))
-    .filter(p => !isNaN(p) && p >= 0);
-
-  if (build <= 0 || rate <= 0) {
-    area.innerHTML = '<p class="no-sale-msg">Enter a build cost and interest rate to see projections.</p>';
+  if (!p.ready) {
+    area.innerHTML = '<p class="no-sale-msg">Enter a build cost and interest rate above to see your monthly payment.</p>';
     return;
   }
 
-  if (validPrices.length === 0) {
-    const payment = monthlyPayment(build, rate, term);
+  const taxNote = p.taxRate > 0 ? `incl. property tax @ ${p.taxRate}%` : 'no property tax set';
+
+  if (p.mode === 'no-sale') {
+    const s = p.scenario;
     area.innerHTML = `
-      <div class="results-grid">
-        <div class="result-item highlight">
-          <div class="result-label">Monthly payment</div>
-          <div class="result-value">${fmt(payment)}</div>
-          <div class="result-sub">No sale proceeds applied</div>
+      <div class="scenario-card single">
+        <div class="card-head">
+          <span class="card-title">Financing the full build</span>
+          <span class="card-sub">No sale proceeds applied</span>
         </div>
-        <div class="result-item">
-          <div class="result-label">Loan amount</div>
-          <div class="result-value">${fmt(build)}</div>
-          <div class="result-sub">${term}-year @ ${rate}%</div>
-        </div>
+        <div class="big-number">${fmt(s.totalMonthly)}<span class="per-mo">/mo</span></div>
+        <div class="big-sub">${taxNote}</div>
+        ${rowsHTML([
+          ['Loan amount', fmt(s.loanNeeded)],
+          ['Principal & interest', fmt(s.principalInterest) + '/mo'],
+          ['Property tax', fmt(s.propertyTax) + '/mo'],
+          ['Total monthly', fmt(s.totalMonthly) + '/mo', { total: true }],
+        ])}
       </div>`;
     return;
   }
 
-  const scenarios = validPrices.map(salePrice => {
-    const loan = Math.max(0, build - salePrice);
-    const payment = loan > 0 ? monthlyPayment(loan, rate, term) : 0;
-    return { salePrice, loan, payment };
-  });
-
   area.innerHTML = `
     <div class="sale-scenarios">
-      ${scenarios.map(s => `
+      ${p.scenarios.map(s => `
         <div class="scenario-card">
-          <div class="result-item">
-            <div class="result-label">Sale price</div>
-            <div class="result-value">${fmt(s.salePrice)}</div>
+          <div class="card-head">
+            <span class="card-title">Sell for ${fmt(s.salePrice)}</span>
+            <span class="card-sub">${s.proceeds < 0
+              ? 'Underwater by ' + fmt(Math.abs(s.proceeds))
+              : fmt(s.proceeds) + ' net after payoff'}</span>
           </div>
-          <div class="result-item">
-            <div class="result-label">Loan needed</div>
-            <div class="result-value">${fmt(s.loan)}</div>
-            <div class="result-sub">${term}-yr @ ${rate}%</div>
-          </div>
-          <div class="result-item highlight">
-            <div class="result-label">Monthly payment</div>
-            <div class="result-value">${s.payment > 0 ? fmt(s.payment) : '—'}</div>
-            <div class="result-sub">${s.loan <= 0 ? 'Fully covered' : ''}</div>
-          </div>
+          <div class="big-number">${s.fullyCovered ? fmt(s.totalMonthly) : fmt(s.totalMonthly)}<span class="per-mo">/mo</span></div>
+          <div class="big-sub">${s.fullyCovered ? 'Build fully covered — tax only' : taxNote}</div>
+          ${rowsHTML([
+            ['Net sale proceeds', fmt(s.proceeds)],
+            ['Loan needed', fmt(s.loanNeeded)],
+            ['Principal & interest', s.principalInterest > 0 ? fmt(s.principalInterest) + '/mo' : '—'],
+            ['Property tax', fmt(s.propertyTax) + '/mo'],
+            ['Total monthly', fmt(s.totalMonthly) + '/mo', { total: true }],
+          ])}
         </div>
       `).join('')}
     </div>`;
 }
 
+// ── Wiring ──────────────────────────────────────────────────────────────────
+
+function populateStateSelect() {
+  const sel = document.getElementById('stateSelect');
+  if (!sel || sel._populated) return;
+  sel._populated = true;
+  const codes = Object.keys(STATE_NAMES).sort((a, b) =>
+    STATE_NAMES[a].localeCompare(STATE_NAMES[b]));
+  sel.insertAdjacentHTML('beforeend',
+    codes.map(c => `<option value="${c}">${STATE_NAMES[c]}</option>`).join(''));
+}
+
 function init() {
   loadState();
+  populateStateSelect();
 
   const buildInput = document.getElementById('buildCost');
   buildInput.value = state.buildCost;
@@ -142,19 +266,45 @@ function init() {
     saveState(); renderResults();
   });
 
-  const termSlider = document.getElementById('loanTerm');
-  termSlider.value = state.loanTerm;
-  document.getElementById('loanTermDisplay').textContent = state.loanTerm;
-  termSlider.addEventListener('input', e => {
-    state.loanTerm = +e.target.value;
-    document.getElementById('loanTermDisplay').textContent = state.loanTerm;
-    saveState(); renderResults();
-  });
-
   const rateInput = document.getElementById('interestRate');
   rateInput.value = state.interestRate;
   rateInput.addEventListener('input', e => {
     state.interestRate = e.target.value;
+    saveState(); renderResults();
+  });
+
+  document.querySelectorAll('.term-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.loanTerm = Number(btn.dataset.term);
+      renderTermButtons();
+      saveState(); renderResults();
+    });
+  });
+  renderTermButtons();
+
+  const stateSelect = document.getElementById('stateSelect');
+  stateSelect.value = state.stateCode;
+  stateSelect.addEventListener('change', e => {
+    state.stateCode = e.target.value;
+    // Auto-fill the rate from the chosen state (user can still override it).
+    if (STATE_TAX_RATES[state.stateCode] != null) {
+      state.propertyTaxRate = String(STATE_TAX_RATES[state.stateCode]);
+      document.getElementById('propertyTaxRate').value = state.propertyTaxRate;
+    }
+    saveState(); renderResults();
+  });
+
+  const taxInput = document.getElementById('propertyTaxRate');
+  taxInput.value = state.propertyTaxRate;
+  taxInput.addEventListener('input', e => {
+    state.propertyTaxRate = e.target.value;
+    saveState(); renderResults();
+  });
+
+  const balanceInput = document.getElementById('currentLoanBalance');
+  balanceInput.value = state.currentLoanBalance;
+  balanceInput.addEventListener('input', e => {
+    state.currentLoanBalance = e.target.value;
     saveState(); renderResults();
   });
 
@@ -166,4 +316,16 @@ function init() {
 
   renderSalePrices();
   renderResults();
+}
+
+// Export pure + internal helpers for the Node test suite. In the browser
+// `module` is undefined, so this block is skipped and functions stay global.
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    STATE_TAX_RATES, STATE_NAMES,
+    monthlyPayment, monthlyPropertyTax, netProceeds, computeProjection, fmt,
+    renderResults, renderSalePrices,
+    __setState: s => { state = s; },
+    __getState: () => state,
+  };
 }
