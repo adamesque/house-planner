@@ -351,31 +351,14 @@ function init() {
   // Fetches the state's counties from the Census API and fills the dropdown.
   // Falls back silently to the state-average rate if the API is unavailable.
   async function loadCounties(preselect) {
+    // County auto-lookup is temporarily disabled (the keyless Census endpoint
+    // was retired). Until a data source is wired up, we show the state average
+    // and let the user enter their exact local rate.
     countySelect.innerHTML = '<option value="">Statewide average</option>';
-    if (!state.stateCode) {
-      countySelect.disabled = true;
-      countyNote.textContent = '';
-      return;
-    }
     countySelect.disabled = true;
-    countyNote.textContent = 'Loading counties…';
-    try {
-      const counties = await fetchCounties(state.stateCode);
-      if (!counties.length) throw new Error('no data');
-      countySelect.insertAdjacentHTML('beforeend', counties
-        .map(c => `<option value="${c.code}" data-rate="${c.rate}">${c.name} — ${c.rate}%</option>`)
-        .join(''));
-      countySelect.disabled = false;
-      countyNote.textContent = 'Pick your county for a local rate, or edit it directly.';
-      if (preselect) {
-        countySelect.value = preselect;
-        const opt = countySelect.selectedOptions[0];
-        if (opt && opt.dataset.rate) setRate(opt.dataset.rate);
-      }
-    } catch {
-      state.countyCode = '';
-      countyNote.textContent = 'County data unavailable — using state average. You can edit the rate below.';
-    }
+    countyNote.textContent = state.stateCode
+      ? 'Showing the statewide average — enter your local rate above for county/city precision.'
+      : '';
   }
 
   const stateSelect = document.getElementById('stateSelect');
