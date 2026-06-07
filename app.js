@@ -44,6 +44,8 @@ let state = {
   salePrices: [''],
   sellingCosts: '',
   otherCosts: '',
+  currentPayment: '',
+  baseTakeHome: '',
 };
 
 // Strip all non-digit characters — used to parse user-typed dollar inputs.
@@ -151,6 +153,46 @@ function fmt(n) {
 
 // ── Rendering ───────────────────────────────────────────────────────────────
 
+// Compact delta + affordability bar comparing totalMonthly to the user's
+// current payment and base take-home. Returns '' when no comparison data set.
+function affordHTML(totalMonthly) {
+  const base = parseFloat(state.baseTakeHome) || 0;
+  const current = parseFloat(state.currentPayment) || 0;
+  if (base <= 0 && current <= 0) return '';
+
+  let html = '<div class="afford-wrap">';
+
+  if (current > 0) {
+    const delta = totalMonthly - current;
+    let deltaStr, deltaCls;
+    if (delta > 0) {
+      deltaStr = `+${fmt(delta)}/mo vs. today`;
+      deltaCls = 'delta-up';
+    } else if (delta < 0) {
+      deltaStr = `-${fmt(Math.abs(delta))}/mo vs. today`;
+      deltaCls = 'delta-down';
+    } else {
+      deltaStr = 'Same as today';
+      deltaCls = 'delta-neutral';
+    }
+    html += `<div class="afford-delta ${deltaCls}">${deltaStr}</div>`;
+  }
+
+  if (base > 0) {
+    const pct = (totalMonthly / base) * 100;
+    const capped = Math.min(pct, 100);
+    const color = pct < 28 ? '#48bb78' : pct < 35 ? '#ed8936' : '#fc8181';
+    const note = pct >= 35 ? ' — above 35% guideline' : pct >= 28 ? ' — above 28% guideline' : '';
+    html += `
+      <div class="afford-track">
+        <div class="afford-fill" style="width:${capped.toFixed(1)}%;background:${color}"></div>
+      </div>
+      <div class="afford-label">${Math.round(pct)}% of base take-home${note}</div>`;
+  }
+
+  return html + '</div>';
+}
+
 function renderSalePrices() {
   const list = document.getElementById('salePricesList');
 
@@ -233,6 +275,7 @@ function renderResults() {
         </div>
         <div class="big-number">${fmt(s.totalMonthly)}<span class="per-mo">/mo</span></div>
         <div class="big-sub">${taxNote}</div>
+        ${affordHTML(s.totalMonthly)}
         <details class="scenario-details">
           <summary>Show breakdown</summary>
           ${rowsHTML([
@@ -258,6 +301,7 @@ function renderResults() {
           </div>
           <div class="big-number">${fmt(s.totalMonthly)}<span class="per-mo">/mo</span></div>
           <div class="big-sub">${s.fullyCovered ? 'Build fully covered — tax only' : taxNote}</div>
+          ${affordHTML(s.totalMonthly)}
           <details class="scenario-details">
             <summary>Show breakdown</summary>
             ${rowsHTML([
@@ -365,6 +409,18 @@ function init() {
     document.getElementById('currentLoanBalance'),
     () => state.currentLoanBalance,
     v => { state.currentLoanBalance = v; },
+  );
+
+  bindDollarInput(
+    document.getElementById('currentPayment'),
+    () => state.currentPayment,
+    v => { state.currentPayment = v; },
+  );
+
+  bindDollarInput(
+    document.getElementById('baseTakeHome'),
+    () => state.baseTakeHome,
+    v => { state.baseTakeHome = v; },
   );
 
   document.getElementById('btnAddPrice').addEventListener('click', () => {

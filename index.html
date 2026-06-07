@@ -140,6 +140,16 @@
     details.scenario-details[open] > summary::before { content: '▾ '; }
     details.scenario-details > summary:hover { color: #4299e1; }
 
+    /* Affordability comparison widget */
+    .afford-wrap { margin: 0.5rem 0 0.6rem; }
+    .afford-delta { font-size: 0.82rem; font-weight: 600; margin-bottom: 0.35rem; }
+    .delta-up { color: #e53e3e; }
+    .delta-down { color: #38a169; }
+    .delta-neutral { color: #718096; }
+    .afford-track { height: 5px; background: #edf2f7; border-radius: 3px; margin-bottom: 0.25rem; overflow: hidden; }
+    .afford-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+    .afford-label { font-size: 0.72rem; color: #a0aec0; }
+
     @media (max-width: 520px) {
       body { padding: 1rem 0.625rem; }
       .card { padding: 1.25rem 1rem; }
@@ -184,6 +194,23 @@
       </div>
     </div>
 
+    <div class="field-row">
+      <div class="field">
+        <label for="stateSelect">State <span class="hint">(fills average)</span></label>
+        <select id="stateSelect">
+          <option value="">Select a state…</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="propertyTaxRate">Property tax rate</label>
+        <div class="input-wrap has-suffix">
+          <input type="number" id="propertyTaxRate" min="0" max="10" step="any" placeholder="e.g. 1.8" />
+          <span class="input-suffix">%</span>
+        </div>
+      </div>
+    </div>
+    <p class="hint" style="margin-top:-0.75rem;margin-bottom:1.25rem">State fills a statewide average — edit for your county rate (e.g. Austin / Travis County ≈ 1.8%).</p>
+
     <details class="additional-costs">
       <summary>Additional costs <span class="hint">(selling costs, closing costs…)</span></summary>
       <div class="additional-costs-body">
@@ -205,27 +232,6 @@
     </details>
   </div>
 
-  <!-- Property tax -->
-  <div class="card">
-    <h2>Property Tax</h2>
-    <div class="field-row">
-      <div class="field">
-        <label for="stateSelect">State <span class="hint">(fills an average)</span></label>
-        <select id="stateSelect">
-          <option value="">Select a state…</option>
-        </select>
-      </div>
-      <div class="field">
-        <label for="propertyTaxRate">Annual rate <span class="hint">(your local rate)</span></label>
-        <div class="input-wrap has-suffix">
-          <input type="number" id="propertyTaxRate" min="0" max="10" step="any" placeholder="e.g. 1.8" />
-          <span class="input-suffix">%</span>
-        </div>
-      </div>
-    </div>
-    <p class="hint">Picking a state fills its statewide average. Set this to your exact county/city rate for accuracy (e.g. Austin / Travis County ≈ 1.8%).</p>
-  </div>
-
   <!-- Current home -->
   <div class="card">
     <h2>Your Current Home</h2>
@@ -235,6 +241,23 @@
       <div class="input-wrap has-prefix">
         <span class="input-prefix">$</span>
         <input type="text" inputmode="numeric" id="currentLoanBalance" placeholder="e.g. 150,000" />
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label for="currentPayment">Current monthly payment</label>
+        <div class="input-wrap has-prefix">
+          <span class="input-prefix">$</span>
+          <input type="text" inputmode="numeric" id="currentPayment" placeholder="e.g. 2,100" />
+        </div>
+      </div>
+      <div class="field">
+        <label for="baseTakeHome">Base take-home <span class="hint">(monthly, after tax)</span></label>
+        <div class="input-wrap has-prefix">
+          <span class="input-prefix">$</span>
+          <input type="text" inputmode="numeric" id="baseTakeHome" placeholder="e.g. 8,500" />
+        </div>
       </div>
     </div>
 
