@@ -150,6 +150,19 @@
     .afford-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
     .afford-label { font-size: 0.72rem; color: #a0aec0; }
 
+    /* Paycheck frequency toggle */
+    .field-label-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.4rem; }
+    .field-label-row label { margin-bottom: 0; }
+    .payfreq-btns { display: flex; gap: 0.25rem; }
+    .payfreq-btn {
+      font-size: 0.7rem; font-weight: 600; padding: 0.2rem 0.45rem;
+      border: 1.5px solid #e2e8f0; border-radius: 6px;
+      background: #f7fafc; color: #718096; cursor: pointer; transition: all 0.15s;
+      line-height: 1.4;
+    }
+    .payfreq-btn:hover { border-color: #4299e1; }
+    .payfreq-btn.active { background: #4299e1; border-color: #4299e1; color: #fff; }
+
     @media (max-width: 520px) {
       body { padding: 1rem 0.625rem; }
       .card { padding: 1.25rem 1rem; }
@@ -253,10 +266,16 @@
         </div>
       </div>
       <div class="field">
-        <label for="baseTakeHome">Base take-home <span class="hint">(monthly, after tax)</span></label>
+        <div class="field-label-row">
+          <label for="paycheckAmt">Per paycheck <span class="hint">(base, after tax)</span></label>
+          <div class="payfreq-btns">
+            <button type="button" class="payfreq-btn" data-freq="2">2×/mo</button>
+            <button type="button" class="payfreq-btn" data-freq="biweekly">bi-wkly</button>
+          </div>
+        </div>
         <div class="input-wrap has-prefix">
           <span class="input-prefix">$</span>
-          <input type="text" inputmode="numeric" id="baseTakeHome" placeholder="e.g. 8,500" />
+          <input type="text" inputmode="numeric" id="paycheckAmt" placeholder="e.g. 4,250" />
         </div>
       </div>
     </div>

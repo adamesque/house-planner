@@ -45,7 +45,8 @@ let state = {
   sellingCosts: '',
   otherCosts: '',
   currentPayment: '',
-  baseTakeHome: '',
+  paycheckAmt: '',
+  paycheckFreq: '2',
 };
 
 // Strip all non-digit characters — used to parse user-typed dollar inputs.
@@ -156,7 +157,8 @@ function fmt(n) {
 // Compact delta + affordability bar comparing totalMonthly to the user's
 // current payment and base take-home. Returns '' when no comparison data set.
 function affordHTML(totalMonthly) {
-  const base = parseFloat(state.baseTakeHome) || 0;
+  const freq = state.paycheckFreq === 'biweekly' ? 26 / 12 : 2;
+  const base = (parseFloat(state.paycheckAmt) || 0) * freq;
   const current = parseFloat(state.currentPayment) || 0;
   if (base <= 0 && current <= 0) return '';
 
@@ -418,10 +420,25 @@ function init() {
   );
 
   bindDollarInput(
-    document.getElementById('baseTakeHome'),
-    () => state.baseTakeHome,
-    v => { state.baseTakeHome = v; },
+    document.getElementById('paycheckAmt'),
+    () => state.paycheckAmt,
+    v => { state.paycheckAmt = v; },
   );
+
+  function renderPayfreqBtns() {
+    document.querySelectorAll('.payfreq-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.freq === state.paycheckFreq);
+    });
+  }
+  document.querySelectorAll('.payfreq-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.paycheckFreq = btn.dataset.freq;
+      renderPayfreqBtns();
+      saveState();
+      renderResults();
+    });
+  });
+  renderPayfreqBtns();
 
   document.getElementById('btnAddPrice').addEventListener('click', () => {
     state.salePrices.push('');
