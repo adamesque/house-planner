@@ -174,10 +174,34 @@
     .term-btn:hover { background: var(--accent-dim); }
     .term-btn.active { background: var(--accent); }
 
+    /* Dollar steppers — revealed under a dollar input while it has focus */
+    .dollar-stepper { display: none; gap: 0.4rem; margin-top: 0.5rem; }
+    .field:focus-within .dollar-stepper,
+    .sale-price-row:focus-within .dollar-stepper { display: flex; }
+    .step-btn {
+      flex: 1;
+      min-height: 40px;
+      padding: 0.4rem 0;
+      border: 1px solid var(--field-border);
+      border-radius: 0;
+      background: var(--card);
+      color: var(--ink);
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      letter-spacing: 0.04em;
+      font-variant-numeric: tabular-nums;
+      cursor: pointer;
+      transition: background 0.15s;
+      touch-action: manipulation;
+    }
+    .step-btn:hover { background: var(--accent-dim); }
+    .step-btn:active { background: var(--accent); }
+
     /* Sale prices */
     .sale-prices-list { display: flex; flex-direction: column; gap: 0.6rem; }
-    .sale-price-row { display: flex; align-items: center; gap: 0.5rem; }
-    .sale-price-row .input-wrap { flex: 1; }
+    .sale-price-row { display: flex; flex-direction: column; }
+    .sale-price-main { display: flex; align-items: center; gap: 0.5rem; }
+    .sale-price-main .input-wrap { flex: 1; }
     .btn-remove {
       flex-shrink: 0;
       background: none;
@@ -437,6 +461,26 @@
         </div>
       </div>
     </details>
+
+    <details class="additional-costs">
+      <summary>Cash toward the build <span class="hint">(savings, RSUs…)</span></summary>
+      <div class="additional-costs-body">
+        <div class="field">
+          <label for="cashOnHand">Cash on hand <span class="hint">(savings you'll put in)</span></label>
+          <div class="input-wrap has-prefix">
+            <span class="input-prefix">$</span>
+            <input type="text" inputmode="numeric" id="cashOnHand" placeholder="e.g. 50,000" />
+          </div>
+        </div>
+        <div class="field" style="margin-bottom:0">
+          <label for="rsuFunds">RSUs / other funds <span class="hint">(after-tax value you'd sell)</span></label>
+          <div class="input-wrap has-prefix">
+            <span class="input-prefix">$</span>
+            <input type="text" inputmode="numeric" id="rsuFunds" placeholder="e.g. 75,000" />
+          </div>
+        </div>
+      </div>
+    </details>
   </div>
 
   <!-- Current home -->
@@ -462,7 +506,7 @@
       <div class="field">
         <div class="field-label-row">
           <label for="paycheckAmt">Per paycheck <span class="hint">(base, after tax)</span></label>
-          <div class="payfreq-btns">
+          <div class="payfreq-btns" id="payfreqBtns1">
             <button type="button" class="payfreq-btn" data-freq="2">2×/mo</button>
             <button type="button" class="payfreq-btn" data-freq="biweekly">bi-wkly</button>
           </div>
@@ -471,6 +515,20 @@
           <span class="input-prefix">$</span>
           <input type="text" inputmode="numeric" id="paycheckAmt" placeholder="e.g. 4,250" />
         </div>
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label-row">
+        <label for="paycheckAmt2">Partner per paycheck <span class="hint">(optional, after tax)</span></label>
+        <div class="payfreq-btns" id="payfreqBtns2">
+          <button type="button" class="payfreq-btn" data-freq="2">2×/mo</button>
+          <button type="button" class="payfreq-btn" data-freq="biweekly">bi-wkly</button>
+        </div>
+      </div>
+      <div class="input-wrap has-prefix">
+        <span class="input-prefix">$</span>
+        <input type="text" inputmode="numeric" id="paycheckAmt2" placeholder="e.g. 3,000" />
       </div>
     </div>
 

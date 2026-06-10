@@ -44,9 +44,22 @@ let state = {
   salePrices: [''],
   sellingCosts: '',
   otherCosts: '',
+  cashOnHand: '',     // savings applied directly to reduce the loan
+  rsuFunds: '',       // expected after-tax RSU/stock proceeds applied to the loan
   currentPayment: '',
   paycheckAmt: '',
   paycheckFreq: '2',
+  paycheckAmt2: '',   // partner per-paycheck take-home (optional)
+  paycheckFreq2: '2',
+};
+
+// Nudge increments for the focus-revealed stepper under each dollar input:
+// [small, big] — rendered as −big −small +small +big.
+const STEPS = {
+  large: [25000, 100000],   // build cost, sale prices
+  medium: [10000, 50000],   // loan balance, cash on hand, RSUs
+  small: [5000, 25000],     // selling / other costs
+  monthly: [100, 500],      // monthly payment, paychecks
 };
 
 // Strip all non-digit characters — used to parse user-typed dollar inputs.
@@ -110,6 +123,7 @@ function computeProjection(s) {
   const taxRate = parseFloat(s.propertyTaxRate) || 0;
   const balance = parseFloat(s.currentLoanBalance) || 0;
   const extraCosts = (parseFloat(s.sellingCosts) || 0) + (parseFloat(s.otherCosts) || 0);
+  const cash = (parseFloat(s.cashOnHand) || 0) + (parseFloat(s.rsuFunds) || 0);
 
   if (build <= 0 || rate <= 0) return { ready: false };
 
@@ -122,7 +136,7 @@ function computeProjection(s) {
 
   function scenarioFor(salePrice) {
     const proceeds = netProceeds(salePrice, balance);
-    const loanNeeded = Math.max(0, build + extraCosts - proceeds);
+    const loanNeeded = Math.max(0, build + extraCosts - proceeds - cash);
     const principalInterest = loanNeeded > 0 ? monthlyPayment(loanNeeded, rate, term) : 0;
     const totalMonthly = principalInterest + propertyTax;
     return {
@@ -132,18 +146,19 @@ function computeProjection(s) {
   }
 
   if (validPrices.length === 0) {
-    const loanNeeded = build + extraCosts;
-    const pi = monthlyPayment(loanNeeded, rate, term);
+    const loanNeeded = Math.max(0, build + extraCosts - cash);
+    const pi = loanNeeded > 0 ? monthlyPayment(loanNeeded, rate, term) : 0;
     return {
-      ready: true, mode: 'no-sale', term, rate, taxRate, propertyTax,
+      ready: true, mode: 'no-sale', term, rate, taxRate, propertyTax, cashApplied: cash,
       scenario: {
         loanNeeded, principalInterest: pi, propertyTax, totalMonthly: pi + propertyTax,
+        fullyCovered: loanNeeded <= 0,
       },
     };
   }
 
   return {
-    ready: true, mode: 'scenarios', term, rate, taxRate, propertyTax,
+    ready: true, mode: 'scenarios', term, rate, taxRate, propertyTax, cashApplied: cash,
     scenarios: validPrices.map(scenarioFor),
   };
 }
@@ -152,13 +167,37 @@ function fmt(n) {
   return '$' + Math.round(n).toLocaleString('en-US');
 }
 
+// ── Dollar steppers ─────────────────────────────────────────────────────────
+// Nudge buttons revealed under a dollar input while it has focus — easier than
+// repositioning the cursor on a mobile numeric keypad.
+
+function stepLabel(n) {
+  return n >= 1000 ? (n / 1000) + 'k' : String(n);
+}
+
+function stepperHTML(steps, extraAttrs = '') {
+  const [small, big] = steps;
+  return `<div class="dollar-stepper"${extraAttrs ? ' ' + extraAttrs : ''}>` +
+    [-big, -small, small, big].map(amt =>
+      `<button type="button" class="step-btn" data-amt="${amt}">` +
+      `${amt > 0 ? '+' : '−'}${stepLabel(Math.abs(amt))}</button>`).join('') +
+    '</div>';
+}
+
+// Apply a step amount to a raw digit string, clamping at zero.
+function stepValue(raw, amt) {
+  const next = Math.max(0, (parseInt(raw, 10) || 0) + amt);
+  return next > 0 ? String(next) : '';
+}
+
 // ── Rendering ───────────────────────────────────────────────────────────────
 
 // Compact delta + affordability bar comparing totalMonthly to the user's
 // current payment and base take-home. Returns '' when no comparison data set.
 function affordHTML(totalMonthly) {
-  const freq = state.paycheckFreq === 'biweekly' ? 26 / 12 : 2;
-  const base = (parseFloat(state.paycheckAmt) || 0) * freq;
+  const freqMult = f => (f === 'biweekly' ? 26 / 12 : 2);
+  const base = (parseFloat(state.paycheckAmt) || 0) * freqMult(state.paycheckFreq)
+    + (parseFloat(state.paycheckAmt2) || 0) * freqMult(state.paycheckFreq2);
   const current = parseFloat(state.currentPayment) || 0;
   if (base <= 0 && current <= 0) return '';
 
@@ -198,6 +237,15 @@ function affordHTML(totalMonthly) {
 function renderSalePrices() {
   const list = document.getElementById('salePricesList');
 
+  function applySaleStep(btn) {
+    const idx = +btn.closest('.dollar-stepper').dataset.idx;
+    state.salePrices[idx] = stepValue(state.salePrices[idx], Number(btn.dataset.amt));
+    const input = list.querySelector(`.sale-price-input[data-idx="${idx}"]`);
+    if (input) input.value = fmtInput(state.salePrices[idx]);
+    saveState();
+    renderResults();
+  }
+
   // Event delegation on the stable parent so listeners survive re-renders.
   if (!list._delegated) {
     list._delegated = true;
@@ -215,7 +263,21 @@ function renderSalePrices() {
       saveState();
       renderResults();
     });
+    // Steppers act on pointerdown with preventDefault so the price input keeps
+    // focus (the stepper stays visible and the mobile keypad stays open).
+    list.addEventListener('pointerdown', e => {
+      const btn = e.target.closest('.step-btn');
+      if (!btn) return;
+      e.preventDefault();
+      applySaleStep(btn);
+    });
     list.addEventListener('click', e => {
+      // Keyboard activation of a step button arrives as a click with detail 0.
+      const stepBtn = e.target.closest('.step-btn');
+      if (stepBtn) {
+        if (e.detail === 0) applySaleStep(stepBtn);
+        return;
+      }
       const btn = e.target.closest('.btn-remove');
       if (!btn) return;
       state.salePrices.splice(+btn.dataset.idx, 1);
@@ -231,12 +293,15 @@ function renderSalePrices() {
     const row = document.createElement('div');
     row.className = 'sale-price-row';
     row.innerHTML = `
-      <div class="input-wrap has-prefix">
-        <span class="input-prefix">$</span>
-        <input type="text" inputmode="numeric" placeholder="e.g. 350,000"
-          value="${fmtInput(price)}" data-idx="${i}" class="sale-price-input" />
+      <div class="sale-price-main">
+        <div class="input-wrap has-prefix">
+          <span class="input-prefix">$</span>
+          <input type="text" inputmode="numeric" placeholder="e.g. 350,000"
+            value="${fmtInput(price)}" data-idx="${i}" class="sale-price-input" />
+        </div>
+        <button class="btn-remove" data-idx="${i}" title="Remove">×</button>
       </div>
-      <button class="btn-remove" data-idx="${i}" title="Remove">×</button>
+      ${stepperHTML(STEPS.large, `data-idx="${i}"`)}
     `;
     list.appendChild(row);
   });
@@ -276,13 +341,14 @@ function renderResults() {
           <span class="card-sub">No sale proceeds applied</span>
         </div>
         <div class="big-number">${fmt(s.totalMonthly)}<span class="per-mo">/mo</span></div>
-        <div class="big-sub">${taxNote}</div>
+        <div class="big-sub">${s.fullyCovered ? 'Covered by cash — tax only' : taxNote}</div>
         ${affordHTML(s.totalMonthly)}
         <details class="scenario-details">
           <summary>Show breakdown</summary>
           ${rowsHTML([
+            ...(p.cashApplied > 0 ? [['Cash applied', '−' + fmt(p.cashApplied)]] : []),
             ['Loan amount', fmt(s.loanNeeded)],
-            ['Principal & interest', fmt(s.principalInterest) + '/mo'],
+            ['Principal & interest', s.principalInterest > 0 ? fmt(s.principalInterest) + '/mo' : '—'],
             ['Property tax', fmt(s.propertyTax) + '/mo'],
             ['Total monthly', fmt(s.totalMonthly) + '/mo', { total: true }],
           ])}
@@ -308,6 +374,7 @@ function renderResults() {
             <summary>Show breakdown</summary>
             ${rowsHTML([
               ['Net sale proceeds', fmt(s.proceeds)],
+              ...(p.cashApplied > 0 ? [['Cash applied', '−' + fmt(p.cashApplied)]] : []),
               ['Loan needed', fmt(s.loanNeeded)],
               ['Principal & interest', s.principalInterest > 0 ? fmt(s.principalInterest) + '/mo' : '—'],
               ['Property tax', fmt(s.propertyTax) + '/mo'],
@@ -323,7 +390,8 @@ function renderResults() {
 
 // Binds a text input to a dollar-amount state field with live comma formatting.
 // Preserves cursor position relative to end of input so editing feels natural.
-function bindDollarInput(el, getter, setter) {
+// `steps` ([small, big]) adds a focus-revealed stepper below the input.
+function bindDollarInput(el, getter, setter, steps) {
   el.value = fmtInput(getter());
   el.addEventListener('input', e => {
     const raw = parseInput(e.target.value);
@@ -335,6 +403,31 @@ function bindDollarInput(el, getter, setter) {
     e.target.setSelectionRange(newPos, newPos);
     saveState();
     renderResults();
+  });
+
+  if (!steps) return;
+  const wrap = el.closest('.input-wrap');
+  wrap.insertAdjacentHTML('afterend', stepperHTML(steps));
+  const stepper = wrap.nextElementSibling;
+
+  const apply = btn => {
+    setter(stepValue(getter(), Number(btn.dataset.amt)));
+    el.value = fmtInput(getter());
+    saveState();
+    renderResults();
+  };
+  // pointerdown + preventDefault keeps the input focused, so the stepper stays
+  // visible and the mobile keypad stays open between taps.
+  stepper.addEventListener('pointerdown', e => {
+    const btn = e.target.closest('.step-btn');
+    if (!btn) return;
+    e.preventDefault();
+    apply(btn);
+  });
+  // Keyboard activation arrives as a click with detail 0 (no pointerdown).
+  stepper.addEventListener('click', e => {
+    const btn = e.target.closest('.step-btn');
+    if (btn && e.detail === 0) apply(btn);
   });
 }
 
@@ -356,6 +449,7 @@ function init() {
     document.getElementById('buildCost'),
     () => state.buildCost,
     v => { state.buildCost = v; },
+    STEPS.large,
   );
 
   const rateInput = document.getElementById('interestRate');
@@ -378,12 +472,28 @@ function init() {
     document.getElementById('sellingCosts'),
     () => state.sellingCosts,
     v => { state.sellingCosts = v; },
+    STEPS.small,
   );
 
   bindDollarInput(
     document.getElementById('otherCosts'),
     () => state.otherCosts,
     v => { state.otherCosts = v; },
+    STEPS.small,
+  );
+
+  bindDollarInput(
+    document.getElementById('cashOnHand'),
+    () => state.cashOnHand,
+    v => { state.cashOnHand = v; },
+    STEPS.medium,
+  );
+
+  bindDollarInput(
+    document.getElementById('rsuFunds'),
+    () => state.rsuFunds,
+    v => { state.rsuFunds = v; },
+    STEPS.medium,
   );
 
   const taxInput = document.getElementById('propertyTaxRate');
@@ -411,34 +521,47 @@ function init() {
     document.getElementById('currentLoanBalance'),
     () => state.currentLoanBalance,
     v => { state.currentLoanBalance = v; },
+    STEPS.medium,
   );
 
   bindDollarInput(
     document.getElementById('currentPayment'),
     () => state.currentPayment,
     v => { state.currentPayment = v; },
+    STEPS.monthly,
   );
 
   bindDollarInput(
     document.getElementById('paycheckAmt'),
     () => state.paycheckAmt,
     v => { state.paycheckAmt = v; },
+    STEPS.monthly,
   );
 
-  function renderPayfreqBtns() {
-    document.querySelectorAll('.payfreq-btn').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.freq === state.paycheckFreq);
+  bindDollarInput(
+    document.getElementById('paycheckAmt2'),
+    () => state.paycheckAmt2,
+    v => { state.paycheckAmt2 = v; },
+    STEPS.monthly,
+  );
+
+  function bindPayFreq(containerId, getter, setter) {
+    const wrap = document.getElementById(containerId);
+    const render = () => wrap.querySelectorAll('.payfreq-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.freq === getter());
     });
-  }
-  document.querySelectorAll('.payfreq-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      state.paycheckFreq = btn.dataset.freq;
-      renderPayfreqBtns();
+    wrap.addEventListener('click', e => {
+      const btn = e.target.closest('.payfreq-btn');
+      if (!btn) return;
+      setter(btn.dataset.freq);
+      render();
       saveState();
       renderResults();
     });
-  });
-  renderPayfreqBtns();
+    render();
+  }
+  bindPayFreq('payfreqBtns1', () => state.paycheckFreq, v => { state.paycheckFreq = v; });
+  bindPayFreq('payfreqBtns2', () => state.paycheckFreq2, v => { state.paycheckFreq2 = v; });
 
   document.getElementById('btnAddPrice').addEventListener('click', () => {
     state.salePrices.push('');
@@ -454,9 +577,9 @@ function init() {
 // `module` is undefined, so this block is skipped and functions stay global.
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
-    STATE_TAX_RATES, STATE_NAMES, DEFAULT_STATE, DEFAULT_TAX_RATE,
+    STATE_TAX_RATES, STATE_NAMES, DEFAULT_STATE, DEFAULT_TAX_RATE, STEPS,
     monthlyPayment, monthlyPropertyTax, netProceeds, computeProjection, fmt,
-    fmtInput, parseInput,
+    fmtInput, parseInput, stepValue, stepperHTML, affordHTML,
     renderResults, renderSalePrices,
     __setState: s => { state = s; },
     __getState: () => state,
