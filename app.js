@@ -183,7 +183,7 @@ function affordHTML(totalMonthly) {
   if (base > 0) {
     const pct = (totalMonthly / base) * 100;
     const capped = Math.min(pct, 100);
-    const color = pct < 28 ? '#48bb78' : pct < 35 ? '#ed8936' : '#fc8181';
+    const color = pct < 28 ? '#4f7a1e' : pct < 35 ? '#a87a12' : '#b23c2a';
     const note = pct >= 35 ? ' — above 35% guideline' : pct >= 28 ? ' — above 28% guideline' : '';
     html += `
       <div class="afford-track">
