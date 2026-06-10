@@ -89,8 +89,20 @@
 
     .field { margin-bottom: 1.4rem; }
     .field:last-child { margin-bottom: 0; }
-    .field-row { display: flex; gap: 1.25rem; margin-bottom: 1.4rem; }
-    .field-row .field { flex: 1; min-width: 0; margin-bottom: 0; }
+    /* Paired fields share grid rows (labels / inputs / steppers) so the input
+       boxes stay aligned even when one label is taller or wraps. */
+    .field-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      column-gap: 1.25rem;
+      margin-bottom: 1.4rem;
+    }
+    .field-row .field { display: contents; }
+    .field-row .field:first-child > * { grid-column: 1; }
+    .field-row .field:last-child > * { grid-column: 2; }
+    .field-row .field > :nth-child(1) { grid-row: 1; }
+    .field-row .field > :nth-child(2) { grid-row: 2; }
+    .field-row .field > :nth-child(3) { grid-row: 3; }
 
     label {
       display: block;
@@ -380,12 +392,11 @@
         padding: 1.25rem 1rem;
         margin-bottom: 1.25rem;
       }
-      .field-row { flex-direction: column; gap: 0; }
-      .field-row .field { margin-bottom: 1.4rem; }
-      .field-row .field:last-child { margin-bottom: 0; }
+      .field-row:not(.keep-row) { display: block; }
+      .field-row:not(.keep-row) .field { display: block; margin-bottom: 1.4rem; }
+      .field-row:not(.keep-row) .field:last-child { margin-bottom: 0; }
       /* Rows marked keep-row stay side by side even on small screens */
-      .field-row.keep-row { flex-direction: row; gap: 0.75rem; }
-      .field-row.keep-row .field { margin-bottom: 0; }
+      .field-row.keep-row { column-gap: 0.75rem; }
       .big-number { font-size: 2.25rem; }
     }
   </style>
