@@ -111,5 +111,7 @@ The widget is purely additive — nothing in `computeProjection` changes if you 
 
 ## What would be natural next additions
 
-- **Contract / draw-schedule modeling**: A section for build-phase expenses (architect fees, deposits, construction draws) with dates, showing cash-flow timing rather than just the final loan. The owner has contract details to supply.
-- **Amortization schedule**: Show how many years until equity thresholds are reached.
+The prioritized roadmap and design principles live in [README.md](README.md) —
+keep it as the single source of truth for planned features. Highlights: the
+overlap/bridge period + contract draw-schedule model (the biggest modeling
+gap) and homeowners insurance.
