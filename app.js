@@ -34,21 +34,38 @@ const STATE_NAMES = {
   WA: 'Washington', WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming',
 };
 
-let state = {
-  buildCost: '',
-  loanTerm: 30,
-  interestRate: '',
-  stateCode: DEFAULT_STATE,
-  propertyTaxRate: DEFAULT_TAX_RATE,
-  currentLoanBalance: '',
-  salePrices: [''],
-  sellingCosts: '',
-  otherCosts: '',
-  currentPayment: '',
-  paycheckAmt: '',
-  paycheckFreq: '2',
-  buildMonths: '12',      // construction duration in months
-  constructionRate: '',   // string %, blank = interestRate + 1
+function defaultState() {
+  return {
+    buildCost: '',
+    loanTerm: 30,
+    interestRate: '',
+    stateCode: DEFAULT_STATE,
+    propertyTaxRate: DEFAULT_TAX_RATE,
+    currentLoanBalance: '',
+    salePrices: [''],
+    sellingCosts: '',
+    otherCosts: '',
+    cashOnHand: '',     // savings applied directly to reduce the loan
+    rsuFunds: '',       // expected after-tax RSU/stock proceeds applied to the loan
+    currentPayment: '',
+    paycheckAmt: '',
+    paycheckFreq: '2',
+    paycheckAmt2: '',   // partner per-paycheck take-home (optional)
+    paycheckFreq2: '2',
+    buildMonths: '12',      // construction duration in months
+    constructionRate: '',   // string %, blank = interestRate + 1
+  };
+}
+
+let state = defaultState();
+
+// Nudge increments for the focus-revealed stepper under each dollar input:
+// [small, big] — rendered as −big −small +small +big.
+const STEPS = {
+  large: [25000, 100000],   // build cost, sale prices
+  medium: [10000, 50000],   // loan balance, cash on hand, RSUs
+  small: [5000, 25000],     // selling / other costs
+  monthly: [100, 500],      // monthly payment, paychecks
 };
 
 // Strip all non-digit characters — used to parse user-typed dollar inputs.
@@ -81,6 +98,130 @@ function loadState() {
 
 function saveState() {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch {}
+  // Mirror every persisted change into the URL so the two can't diverge.
+  // Debounced so localStorage still captures in-progress typing immediately
+  // while the URL catches up at most ~400ms behind (or instantly on blur).
+  scheduleURLSync();
+}
+
+// ── Shareable URLs ──────────────────────────────────────────────────────────
+// The query string is the canonical, shareable form of the state. On load,
+// URL params win; localStorage only bootstraps state when the URL carries no
+// recognized params. After that every state change is written back via
+// history.replaceState, and popstate re-derives state from the URL.
+// Params equal to their defaults are omitted to keep URLs short.
+
+const URL_PARAMS = {
+  build: 'buildCost',
+  term: 'loanTerm',
+  rate: 'interestRate',
+  state: 'stateCode',
+  tax: 'propertyTaxRate',
+  balance: 'currentLoanBalance',
+  sale: 'salePrices',
+  selling: 'sellingCosts',
+  other: 'otherCosts',
+  cash: 'cashOnHand',
+  rsu: 'rsuFunds',
+  payment: 'currentPayment',
+  paycheck: 'paycheckAmt',
+  freq: 'paycheckFreq',
+  paycheck2: 'paycheckAmt2',
+  freq2: 'paycheckFreq2',
+  months: 'buildMonths',
+  buildrate: 'constructionRate',
+};
+
+const FLOAT_RE = /^\d*\.?\d*$/;
+const PAY_FREQS = ['2', 'biweekly'];
+
+function stateToParams(s) {
+  const defaults = defaultState();
+  const params = new URLSearchParams();
+  for (const [name, field] of Object.entries(URL_PARAMS)) {
+    if (field === 'salePrices') {
+      const prices = (s.salePrices || []).map(parseInput).filter(Boolean);
+      if (prices.length) params.set(name, prices.join(','));
+      continue;
+    }
+    const value = String(s[field] == null ? '' : s[field]);
+    if (value !== String(defaults[field])) params.set(name, value);
+  }
+  return params;
+}
+
+// Builds a full state object from URL params. Unknown or invalid values fall
+// back to defaults, and dollar amounts are stripped to raw digit strings, so
+// a hand-edited or truncated URL can never produce a malformed state.
+function paramsToState(params) {
+  const s = defaultState();
+  if (params.has('build')) s.buildCost = parseInput(params.get('build'));
+  if (params.has('term')) {
+    const term = Number(params.get('term'));
+    if ([15, 20, 30].includes(term)) s.loanTerm = term;
+  }
+  if (params.has('rate') && FLOAT_RE.test(params.get('rate'))) {
+    s.interestRate = params.get('rate');
+  }
+  if (params.has('state')) {
+    const code = params.get('state');
+    if (code === '' || STATE_NAMES[code]) s.stateCode = code;
+  }
+  if (params.has('tax') && FLOAT_RE.test(params.get('tax'))) {
+    s.propertyTaxRate = params.get('tax');
+  }
+  if (params.has('balance')) s.currentLoanBalance = parseInput(params.get('balance'));
+  if (params.has('sale')) {
+    const prices = params.get('sale').split(',').map(parseInput).filter(Boolean);
+    s.salePrices = prices.length ? prices : [''];
+  }
+  if (params.has('selling')) s.sellingCosts = parseInput(params.get('selling'));
+  if (params.has('other')) s.otherCosts = parseInput(params.get('other'));
+  if (params.has('cash')) s.cashOnHand = parseInput(params.get('cash'));
+  if (params.has('rsu')) s.rsuFunds = parseInput(params.get('rsu'));
+  if (params.has('payment')) s.currentPayment = parseInput(params.get('payment'));
+  if (params.has('paycheck')) s.paycheckAmt = parseInput(params.get('paycheck'));
+  if (params.has('freq') && PAY_FREQS.includes(params.get('freq'))) {
+    s.paycheckFreq = params.get('freq');
+  }
+  if (params.has('paycheck2')) s.paycheckAmt2 = parseInput(params.get('paycheck2'));
+  if (params.has('freq2') && PAY_FREQS.includes(params.get('freq2'))) {
+    s.paycheckFreq2 = params.get('freq2');
+  }
+  if (params.has('months')) {
+    const m = parseInt(params.get('months'), 10);
+    if (m > 0 && m <= 60) s.buildMonths = String(m);
+  }
+  if (params.has('buildrate') && FLOAT_RE.test(params.get('buildrate'))) {
+    s.constructionRate = params.get('buildrate');
+  }
+  return s;
+}
+
+function hasStateParams(params) {
+  return Object.keys(URL_PARAMS).some(name => params.has(name));
+}
+
+let urlSyncTimer = null;
+
+// Writes the current state into the URL right now (also flushes any pending
+// debounced sync). Safe to call anywhere: no-ops outside a browser context.
+function syncURL() {
+  if (urlSyncTimer !== null) { clearTimeout(urlSyncTimer); urlSyncTimer = null; }
+  if (typeof history === 'undefined' || typeof location === 'undefined') return;
+  // Decode commas in the sale-price list for a friendlier shareable URL.
+  const qs = stateToParams(state).toString().replace(/%2C/gi, ',');
+  const url = location.pathname + (qs ? '?' + qs : '') + location.hash;
+  try { history.replaceState(null, '', url); } catch {}
+}
+
+// Debounced sync so fast typing doesn't hit Safari's replaceState rate limit
+// (~100 calls per 30s). Blur and discrete controls call syncURL() directly.
+function scheduleURLSync() {
+  if (typeof history === 'undefined') return;
+  clearTimeout(urlSyncTimer);
+  urlSyncTimer = setTimeout(syncURL, 400);
+  if (urlSyncTimer.unref) urlSyncTimer.unref(); // don't hold Node test process open
 }
 
 // ── Pure calculation helpers ────────────────────────────────────────────────
@@ -112,6 +253,7 @@ function computeProjection(s) {
   const taxRate = parseFloat(s.propertyTaxRate) || 0;
   const balance = parseFloat(s.currentLoanBalance) || 0;
   const extraCosts = (parseFloat(s.sellingCosts) || 0) + (parseFloat(s.otherCosts) || 0);
+  const cash = (parseFloat(s.cashOnHand) || 0) + (parseFloat(s.rsuFunds) || 0);
 
   if (build <= 0 || rate <= 0) return { ready: false };
 
@@ -124,7 +266,7 @@ function computeProjection(s) {
 
   function scenarioFor(salePrice) {
     const proceeds = netProceeds(salePrice, balance);
-    const loanNeeded = Math.max(0, build + extraCosts - proceeds);
+    const loanNeeded = Math.max(0, build + extraCosts - proceeds - cash);
     const principalInterest = loanNeeded > 0 ? monthlyPayment(loanNeeded, rate, term) : 0;
     const totalMonthly = principalInterest + propertyTax;
     return {
@@ -134,18 +276,19 @@ function computeProjection(s) {
   }
 
   if (validPrices.length === 0) {
-    const loanNeeded = build + extraCosts;
-    const pi = monthlyPayment(loanNeeded, rate, term);
+    const loanNeeded = Math.max(0, build + extraCosts - cash);
+    const pi = loanNeeded > 0 ? monthlyPayment(loanNeeded, rate, term) : 0;
     return {
-      ready: true, mode: 'no-sale', term, rate, taxRate, propertyTax,
+      ready: true, mode: 'no-sale', term, rate, taxRate, propertyTax, cashApplied: cash,
       scenario: {
         loanNeeded, principalInterest: pi, propertyTax, totalMonthly: pi + propertyTax,
+        fullyCovered: loanNeeded <= 0,
       },
     };
   }
 
   return {
-    ready: true, mode: 'scenarios', term, rate, taxRate, propertyTax,
+    ready: true, mode: 'scenarios', term, rate, taxRate, propertyTax, cashApplied: cash,
     scenarios: validPrices.map(scenarioFor),
   };
 }
@@ -193,13 +336,37 @@ function fmt(n) {
   return '$' + Math.round(n).toLocaleString('en-US');
 }
 
+// ── Dollar steppers ─────────────────────────────────────────────────────────
+// Nudge buttons revealed under a dollar input while it has focus — easier than
+// repositioning the cursor on a mobile numeric keypad.
+
+function stepLabel(n) {
+  return n >= 1000 ? (n / 1000) + 'k' : String(n);
+}
+
+function stepperHTML(steps, extraAttrs = '') {
+  const [small, big] = steps;
+  return `<div class="dollar-stepper"${extraAttrs ? ' ' + extraAttrs : ''}>` +
+    [-big, -small, small, big].map(amt =>
+      `<button type="button" class="step-btn" data-amt="${amt}">` +
+      `${amt > 0 ? '+' : '−'}${stepLabel(Math.abs(amt))}</button>`).join('') +
+    '</div>';
+}
+
+// Apply a step amount to a raw digit string, clamping at zero.
+function stepValue(raw, amt) {
+  const next = Math.max(0, (parseInt(raw, 10) || 0) + amt);
+  return next > 0 ? String(next) : '';
+}
+
 // ── Rendering ───────────────────────────────────────────────────────────────
 
 // Compact delta + affordability bar comparing totalMonthly to the user's
 // current payment and base take-home. Returns '' when no comparison data set.
 function affordHTML(totalMonthly) {
-  const freq = state.paycheckFreq === 'biweekly' ? 26 / 12 : 2;
-  const base = (parseFloat(state.paycheckAmt) || 0) * freq;
+  const freqMult = f => (f === 'biweekly' ? 26 / 12 : 2);
+  const base = (parseFloat(state.paycheckAmt) || 0) * freqMult(state.paycheckFreq)
+    + (parseFloat(state.paycheckAmt2) || 0) * freqMult(state.paycheckFreq2);
   const current = parseFloat(state.currentPayment) || 0;
   if (base <= 0 && current <= 0) return '';
 
@@ -239,6 +406,15 @@ function affordHTML(totalMonthly) {
 function renderSalePrices() {
   const list = document.getElementById('salePricesList');
 
+  function applySaleStep(btn) {
+    const idx = +btn.closest('.dollar-stepper').dataset.idx;
+    state.salePrices[idx] = stepValue(state.salePrices[idx], Number(btn.dataset.amt));
+    const input = list.querySelector(`.sale-price-input[data-idx="${idx}"]`);
+    if (input) input.value = fmtInput(state.salePrices[idx]);
+    saveState();
+    renderResults();
+  }
+
   // Event delegation on the stable parent so listeners survive re-renders.
   if (!list._delegated) {
     list._delegated = true;
@@ -256,12 +432,31 @@ function renderSalePrices() {
       saveState();
       renderResults();
     });
+    // focusout bubbles (blur doesn't) — flush the pending URL sync on blur.
+    list.addEventListener('focusout', e => {
+      if (e.target.classList.contains('sale-price-input')) syncURL();
+    });
+    // Steppers act on pointerdown with preventDefault so the price input keeps
+    // focus (the stepper stays visible and the mobile keypad stays open).
+    list.addEventListener('pointerdown', e => {
+      const btn = e.target.closest('.step-btn');
+      if (!btn) return;
+      e.preventDefault();
+      applySaleStep(btn);
+    });
     list.addEventListener('click', e => {
+      // Keyboard activation of a step button arrives as a click with detail 0.
+      const stepBtn = e.target.closest('.step-btn');
+      if (stepBtn) {
+        if (e.detail === 0) applySaleStep(stepBtn);
+        return;
+      }
       const btn = e.target.closest('.btn-remove');
       if (!btn) return;
       state.salePrices.splice(+btn.dataset.idx, 1);
       if (state.salePrices.length === 0) state.salePrices = [''];
       saveState();
+      syncURL();
       renderSalePrices();
       renderResults();
     });
@@ -272,12 +467,15 @@ function renderSalePrices() {
     const row = document.createElement('div');
     row.className = 'sale-price-row';
     row.innerHTML = `
-      <div class="input-wrap has-prefix">
-        <span class="input-prefix">$</span>
-        <input type="text" inputmode="numeric" placeholder="e.g. 350,000"
-          value="${fmtInput(price)}" data-idx="${i}" class="sale-price-input" />
+      <div class="sale-price-main">
+        <div class="input-wrap has-prefix">
+          <span class="input-prefix">$</span>
+          <input type="text" inputmode="numeric" placeholder="e.g. 350,000"
+            value="${fmtInput(price)}" data-idx="${i}" class="sale-price-input" />
+        </div>
+        <button class="btn-remove" data-idx="${i}" title="Remove">×</button>
       </div>
-      <button class="btn-remove" data-idx="${i}" title="Remove">×</button>
+      ${stepperHTML(STEPS.large, `data-idx="${i}"`)}
     `;
     list.appendChild(row);
   });
@@ -287,6 +485,24 @@ function renderTermButtons() {
   document.querySelectorAll('.term-btn').forEach(btn => {
     btn.classList.toggle('active', Number(btn.dataset.term) === Number(state.loanTerm));
   });
+}
+
+function renderMonthsButtons() {
+  document.querySelectorAll('.months-btn').forEach(btn => {
+    btn.classList.toggle('active', String(btn.dataset.months) === String(state.buildMonths));
+  });
+}
+
+function renderPayfreqBtns() {
+  const paint = (id, val) => {
+    const wrap = document.getElementById(id);
+    if (!wrap) return;
+    wrap.querySelectorAll('.payfreq-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.freq === val);
+    });
+  };
+  paint('payfreqBtns1', state.paycheckFreq);
+  paint('payfreqBtns2', state.paycheckFreq2);
 }
 
 function rowsHTML(rows) {
@@ -317,13 +533,14 @@ function renderResults() {
           <span class="card-sub">No sale proceeds applied</span>
         </div>
         <div class="big-number">${fmt(s.totalMonthly)}<span class="per-mo">/mo</span></div>
-        <div class="big-sub">${taxNote}</div>
+        <div class="big-sub">${s.fullyCovered ? 'Covered by cash — tax only' : taxNote}</div>
         ${affordHTML(s.totalMonthly)}
         <details class="scenario-details">
           <summary>Show breakdown</summary>
           ${rowsHTML([
+            ...(p.cashApplied > 0 ? [['Cash applied', '−' + fmt(p.cashApplied)]] : []),
             ['Loan amount', fmt(s.loanNeeded)],
-            ['Principal & interest', fmt(s.principalInterest) + '/mo'],
+            ['Principal & interest', s.principalInterest > 0 ? fmt(s.principalInterest) + '/mo' : '—'],
             ['Property tax', fmt(s.propertyTax) + '/mo'],
             ['Total monthly', fmt(s.totalMonthly) + '/mo', { total: true }],
           ])}
@@ -349,6 +566,7 @@ function renderResults() {
             <summary>Show breakdown</summary>
             ${rowsHTML([
               ['Net sale proceeds', fmt(s.proceeds)],
+              ...(p.cashApplied > 0 ? [['Cash applied', '−' + fmt(p.cashApplied)]] : []),
               ['Loan needed', fmt(s.loanNeeded)],
               ['Principal & interest', s.principalInterest > 0 ? fmt(s.principalInterest) + '/mo' : '—'],
               ['Property tax', fmt(s.propertyTax) + '/mo'],
@@ -424,10 +642,25 @@ function renderAll() {
 
 // ── Wiring ──────────────────────────────────────────────────────────────────
 
+// Static dollar inputs whose element id matches their state field name 1:1,
+// with the stepper increments each one gets. Drives both the event bindings
+// in init() and the value rewrites in applyStateToDOM().
+const DOLLAR_FIELDS = {
+  buildCost: STEPS.large,
+  sellingCosts: STEPS.small,
+  otherCosts: STEPS.small,
+  cashOnHand: STEPS.medium,
+  rsuFunds: STEPS.medium,
+  currentLoanBalance: STEPS.medium,
+  currentPayment: STEPS.monthly,
+  paycheckAmt: STEPS.monthly,
+  paycheckAmt2: STEPS.monthly,
+};
+
 // Binds a text input to a dollar-amount state field with live comma formatting.
 // Preserves cursor position relative to end of input so editing feels natural.
-function bindDollarInput(el, getter, setter) {
-  el.value = fmtInput(getter());
+// `steps` ([small, big]) adds a focus-revealed stepper below the input.
+function bindDollarInput(el, getter, setter, steps) {
   el.addEventListener('input', e => {
     const raw = parseInput(e.target.value);
     const formatted = fmtInput(raw);
@@ -439,6 +672,55 @@ function bindDollarInput(el, getter, setter) {
     saveState();
     renderAll();
   });
+  el.addEventListener('blur', syncURL);
+
+  if (!steps) return;
+  const wrap = el.closest('.input-wrap');
+  wrap.insertAdjacentHTML('afterend', stepperHTML(steps));
+  const stepper = wrap.nextElementSibling;
+
+  const apply = btn => {
+    setter(stepValue(getter(), Number(btn.dataset.amt)));
+    el.value = fmtInput(getter());
+    saveState();
+    renderAll();
+  };
+  // pointerdown + preventDefault keeps the input focused, so the stepper stays
+  // visible and the mobile keypad stays open between taps.
+  stepper.addEventListener('pointerdown', e => {
+    const btn = e.target.closest('.step-btn');
+    if (!btn) return;
+    e.preventDefault();
+    apply(btn);
+  });
+  // Keyboard activation arrives as a click with detail 0 (no pointerdown).
+  stepper.addEventListener('click', e => {
+    const btn = e.target.closest('.step-btn');
+    if (btn && e.detail === 0) apply(btn);
+  });
+}
+
+// Writes the current state into every form control and re-renders. Used on
+// init and whenever the URL changes underneath us (popstate), so the page
+// always reflects exactly what the URL/state says.
+function applyStateToDOM() {
+  for (const field of Object.keys(DOLLAR_FIELDS)) {
+    const el = document.getElementById(field);
+    if (el) el.value = fmtInput(state[field]);
+  }
+  const rateInput = document.getElementById('interestRate');
+  if (rateInput) rateInput.value = state.interestRate;
+  const taxInput = document.getElementById('propertyTaxRate');
+  if (taxInput) taxInput.value = state.propertyTaxRate;
+  const stateSelect = document.getElementById('stateSelect');
+  if (stateSelect) stateSelect.value = state.stateCode;
+  const crInput = document.getElementById('constructionRate');
+  if (crInput) crInput.value = state.constructionRate;
+  renderTermButtons();
+  renderMonthsButtons();
+  renderPayfreqBtns();
+  renderSalePrices();
+  renderAll();
 }
 
 function populateStateSelect() {
@@ -452,117 +734,94 @@ function populateStateSelect() {
 }
 
 function init() {
-  loadState();
+  // URL params are the source of truth when present; localStorage only
+  // bootstraps state when the URL carries none. Either way the URL is
+  // immediately rewritten from state, so it always reflects the page.
+  const params = typeof location !== 'undefined'
+    ? new URLSearchParams(location.search)
+    : new URLSearchParams();
+  if (hasStateParams(params)) {
+    state = paramsToState(params);
+    saveState();
+  } else {
+    state = defaultState();
+    loadState();
+  }
+  syncURL();
+
   populateStateSelect();
 
-  bindDollarInput(
-    document.getElementById('buildCost'),
-    () => state.buildCost,
-    v => { state.buildCost = v; },
-  );
+  for (const [field, steps] of Object.entries(DOLLAR_FIELDS)) {
+    bindDollarInput(
+      document.getElementById(field),
+      () => state[field],
+      v => { state[field] = v; },
+      steps,
+    );
+  }
 
   const rateInput = document.getElementById('interestRate');
-  rateInput.value = state.interestRate;
   rateInput.addEventListener('input', e => {
     state.interestRate = e.target.value;
     saveState(); renderAll();
   });
+  rateInput.addEventListener('blur', syncURL);
 
   const constructionRateInput = document.getElementById('constructionRate');
-  constructionRateInput.value = state.constructionRate;
   constructionRateInput.addEventListener('input', e => {
     state.constructionRate = e.target.value;
     saveState(); renderAll();
   });
+  constructionRateInput.addEventListener('blur', syncURL);
 
-  function renderMonthsButtons() {
-    document.querySelectorAll('.months-btn').forEach(btn => {
-      btn.classList.toggle('active', String(btn.dataset.months) === String(state.buildMonths));
-    });
-  }
   document.querySelectorAll('.months-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       state.buildMonths = btn.dataset.months;
       renderMonthsButtons();
-      saveState(); renderAll();
+      saveState(); syncURL(); renderAll();
     });
   });
-  renderMonthsButtons();
 
   document.querySelectorAll('.term-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       state.loanTerm = Number(btn.dataset.term);
       renderTermButtons();
-      saveState(); renderResults();
+      saveState(); syncURL(); renderResults();
     });
   });
-  renderTermButtons();
-
-  bindDollarInput(
-    document.getElementById('sellingCosts'),
-    () => state.sellingCosts,
-    v => { state.sellingCosts = v; },
-  );
-
-  bindDollarInput(
-    document.getElementById('otherCosts'),
-    () => state.otherCosts,
-    v => { state.otherCosts = v; },
-  );
 
   const taxInput = document.getElementById('propertyTaxRate');
 
   // Picking a state fills its average rate as a convenient starting point;
   // the rate field is freely editable for your exact local (county/city) rate.
   const stateSelect = document.getElementById('stateSelect');
-  stateSelect.value = state.stateCode;
   stateSelect.addEventListener('change', e => {
     state.stateCode = e.target.value;
     if (STATE_TAX_RATES[state.stateCode] != null) {
       state.propertyTaxRate = String(STATE_TAX_RATES[state.stateCode]);
       taxInput.value = state.propertyTaxRate;
     }
-    saveState(); renderResults();
+    saveState(); syncURL(); renderResults();
   });
 
-  taxInput.value = state.propertyTaxRate;
   taxInput.addEventListener('input', e => {
     state.propertyTaxRate = e.target.value;
     saveState(); renderResults();
   });
+  taxInput.addEventListener('blur', syncURL);
 
-  bindDollarInput(
-    document.getElementById('currentLoanBalance'),
-    () => state.currentLoanBalance,
-    v => { state.currentLoanBalance = v; },
-  );
-
-  bindDollarInput(
-    document.getElementById('currentPayment'),
-    () => state.currentPayment,
-    v => { state.currentPayment = v; },
-  );
-
-  bindDollarInput(
-    document.getElementById('paycheckAmt'),
-    () => state.paycheckAmt,
-    v => { state.paycheckAmt = v; },
-  );
-
-  function renderPayfreqBtns() {
-    document.querySelectorAll('.payfreq-btn').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.freq === state.paycheckFreq);
-    });
-  }
-  document.querySelectorAll('.payfreq-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      state.paycheckFreq = btn.dataset.freq;
+  function bindPayFreq(containerId, setter) {
+    document.getElementById(containerId).addEventListener('click', e => {
+      const btn = e.target.closest('.payfreq-btn');
+      if (!btn) return;
+      setter(btn.dataset.freq);
       renderPayfreqBtns();
-      saveState();
+      saveState(); syncURL();
       renderAll();
     });
-  });
-  renderPayfreqBtns();
+  }
+  bindPayFreq('payfreqBtns1', v => { state.paycheckFreq = v; });
+  bindPayFreq('payfreqBtns2', v => { state.paycheckFreq2 = v; });
 
   document.getElementById('btnAddPrice').addEventListener('click', () => {
     state.salePrices.push('');
@@ -570,18 +829,35 @@ function init() {
     renderSalePrices();
   });
 
-  renderSalePrices();
-  renderAll();
+  // Back/forward navigation: re-derive state from the URL and redraw the
+  // whole form so the page can never disagree with the address bar.
+  if (typeof window !== 'undefined') {
+    window.addEventListener('popstate', () => {
+      const p = new URLSearchParams(location.search);
+      if (hasStateParams(p)) {
+        state = paramsToState(p);
+      } else {
+        state = defaultState();
+        loadState();
+      }
+      saveState();
+      applyStateToDOM();
+    });
+  }
+
+  applyStateToDOM();
 }
 
 // Export pure + internal helpers for the Node test suite. In the browser
 // `module` is undefined, so this block is skipped and functions stay global.
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
-    STATE_TAX_RATES, STATE_NAMES, DEFAULT_STATE, DEFAULT_TAX_RATE,
+    STATE_TAX_RATES, STATE_NAMES, DEFAULT_STATE, DEFAULT_TAX_RATE, STEPS,
     monthlyPayment, monthlyPropertyTax, netProceeds, computeProjection, fmt,
-    fmtInput, parseInput, drawCurve, computeBuildPhase,
-    renderResults, renderSalePrices, renderBuildPhase,
+    fmtInput, parseInput, stepValue, stepperHTML, affordHTML,
+    stateToParams, paramsToState, hasStateParams, syncURL, defaultState,
+    drawCurve, computeBuildPhase,
+    renderResults, renderSalePrices, renderBuildPhase, init,
     __setState: s => { state = s; },
     __getState: () => state,
   };
