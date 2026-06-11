@@ -23,7 +23,18 @@ Everything lives in `app.js`. The key structural decision is a **pure computatio
 - `renderResults()`, `renderSalePrices()` — read from module-level `state`, mutate the DOM.
 - `init()` — wires up event listeners, loads state, calls both renderers.
 
-State is a plain object kept in module scope. `saveState()` / `loadState()` persist it to `localStorage` as JSON.
+State is a plain object kept in module scope (initialized from `defaultState()`). `saveState()` / `loadState()` persist it to `localStorage` as JSON.
+
+## Shareable URLs (URL is the source of truth)
+
+State is mirrored into the query string so any URL is a shareable snapshot. The invariant: **the URL drives page state, and every state change is written back to the URL** — they cannot diverge.
+
+- `stateToParams(s)` / `paramsToState(params)` — pure, tested serializers. Params equal to defaults are omitted (pristine page = clean URL). Invalid param values (bad term, unknown state code, junk floats) fall back to defaults; dollar params are run through `parseInput`. `salePrices` serialize as a comma list (`sale=350000,400000`).
+- Param names: `build`, `term`, `rate`, `state`, `tax`, `balance`, `sale`, `selling`, `other`, `payment`, `paycheck`, `freq` (see `URL_PARAMS` map).
+- **Boot order in `init()`**: if the URL has any recognized param, `paramsToState()` wins outright (localStorage is ignored, then overwritten). Only a param-less URL bootstraps from localStorage — and `syncURL()` immediately writes that state into the URL via `replaceState`.
+- **Write-back**: `saveState()` persists to localStorage instantly (captures in-progress typing) and schedules a debounced (~400ms) `syncURL()`. Blur handlers and discrete controls (term/freq buttons, state select, sale-price remove) call `syncURL()` directly to flush. The debounce exists because **Safari rate-limits `replaceState` to ~100 calls per 30s** — don't sync on every keystroke.
+- **`popstate`** re-derives state from the URL and calls `applyStateToDOM()`, which rewrites every form control + re-renders. Use `applyStateToDOM()` any time state changes wholesale.
+- Non-empty values that *differ* from a non-empty default (e.g. tax rate cleared to `''` vs default `1.8`) are still serialized (`tax=`) — skipping them would silently revert to the default on decode.
 
 ## State schema
 
@@ -52,7 +63,7 @@ Dollar amount inputs are `type="text"` with `inputmode="numeric"`. Two helpers m
 
 - `parseInput(str)` — strips all non-digits, returns raw string (e.g. `'500,000'` → `'500000'`)
 - `fmtInput(rawStr)` — adds commas for display (e.g. `'500000'` → `'500,000'`)
-- `bindDollarInput(el, getter, setter)` — attaches a single `input` listener that strips, stores raw, reformats, and preserves cursor-from-end position.
+- `bindDollarInput(el, setter)` — attaches a single `input` listener that strips, stores raw, reformats, and preserves cursor-from-end position; plus a `blur` listener that flushes the pending URL sync. Initial values come from `applyStateToDOM()`, not the binding. The static dollar inputs are listed in `DOLLAR_FIELDS` (element id === state field name).
 
 State always stores raw digit strings. `computeProjection` receives raw strings and uses `parseFloat()` on them.
 
@@ -72,7 +83,7 @@ if (typeof module !== 'undefined' && module.exports) {
 
 In the browser `module` is undefined, so the block is skipped and everything stays as globals. In Node it exports normally.
 
-**DOM tests** use jsdom: `makeDOM()` sets `global.document` and `global.localStorage` before each test. `__setState(s)` and `__getState()` are exported to let tests inject state without touching the DOM.
+**DOM tests** use jsdom: `makeDOM()` sets `global.document` and `global.localStorage` before each test. `__setState(s)` and `__getState()` are exported to let tests inject state without touching the DOM. `makeFullDOM(url)` builds a fixture with every element `init()` needs (plus `global.window/location/history`) for end-to-end URL ⇄ state ⇄ localStorage tests — pass the query string in the jsdom `url`.
 
 **Pure logic tests** (`computeProjection`, `monthlyPayment`, etc.) need no DOM setup at all.
 

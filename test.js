@@ -6,7 +6,8 @@ const app = require('./app.js');
 const {
   monthlyPayment, monthlyPropertyTax, netProceeds, computeProjection, fmt,
   fmtInput, parseInput,
-  renderResults, renderSalePrices, STATE_TAX_RATES, STATE_NAMES,
+  stateToParams, paramsToState, hasStateParams, defaultState,
+  renderResults, renderSalePrices, init, STATE_TAX_RATES, STATE_NAMES,
   DEFAULT_STATE, DEFAULT_TAX_RATE,
   __setState,
 } = app;
@@ -287,5 +288,149 @@ describe('renderSalePrices (DOM)', () => {
     document.querySelector('.btn-remove').click();
     assert.equal(app.__getState().salePrices.length, 1);
     assert.equal(app.__getState().salePrices[0], '');
+  });
+});
+
+describe('stateToParams / paramsToState', () => {
+  test('pristine default state serializes to no params', () => {
+    assert.equal(stateToParams(defaultState()).toString(), '');
+  });
+
+  test('hasStateParams false for unrelated params', () => {
+    assert.equal(hasStateParams(new URLSearchParams('utm_source=x')), false);
+  });
+
+  test('hasStateParams true when any state param present', () => {
+    assert.equal(hasStateParams(new URLSearchParams('build=500000')), true);
+  });
+
+  test('round-trips a fully populated state', () => {
+    const s = {
+      ...defaultState(),
+      buildCost: '500000', loanTerm: 15, interestRate: '6.75',
+      stateCode: 'CA', propertyTaxRate: '0.71', currentLoanBalance: '150000',
+      salePrices: ['350000', '400000'], sellingCosts: '25000',
+      otherCosts: '10000', currentPayment: '2100', paycheckAmt: '4250',
+      paycheckFreq: 'biweekly',
+    };
+    assert.deepEqual(paramsToState(stateToParams(s)), s);
+  });
+
+  test('non-default empty value still round-trips (cleared tax rate)', () => {
+    const s = { ...defaultState(), propertyTaxRate: '' };
+    const params = stateToParams(s);
+    assert.ok(params.has('tax'));
+    assert.equal(paramsToState(params).propertyTaxRate, '');
+  });
+
+  test('empty sale price entries are dropped from the URL', () => {
+    const s = { ...defaultState(), salePrices: ['', '350000', ''] };
+    assert.equal(stateToParams(s).get('sale'), '350000');
+  });
+
+  test('sale param decodes a comma list', () => {
+    const s = paramsToState(new URLSearchParams('sale=350000,400000'));
+    assert.deepEqual(s.salePrices, ['350000', '400000']);
+  });
+
+  test('missing params fall back to defaults', () => {
+    const s = paramsToState(new URLSearchParams('build=500000'));
+    assert.equal(s.buildCost, '500000');
+    assert.equal(s.loanTerm, 30);
+    assert.equal(s.stateCode, DEFAULT_STATE);
+    assert.equal(s.propertyTaxRate, DEFAULT_TAX_RATE);
+  });
+
+  test('invalid values are rejected in favor of defaults', () => {
+    const s = paramsToState(new URLSearchParams(
+      'term=99&freq=weekly&state=ZZ&rate=abc&tax=1.2.3'));
+    assert.equal(s.loanTerm, 30);
+    assert.equal(s.paycheckFreq, '2');
+    assert.equal(s.stateCode, DEFAULT_STATE);
+    assert.equal(s.interestRate, '');
+    assert.equal(s.propertyTaxRate, DEFAULT_TAX_RATE);
+  });
+
+  test('dollar params are stripped to raw digits', () => {
+    const s = paramsToState(new URLSearchParams('build=$500,000&balance=15x0'));
+    assert.equal(s.buildCost, '500000');
+    assert.equal(s.currentLoanBalance, '150');
+  });
+});
+
+// Full-page fixture with every element init() wires up, so we can test the
+// URL ⇄ state ⇄ localStorage bootstrapping end to end.
+function makeFullDOM(url = 'http://localhost/') {
+  const dom = new JSDOM(`<!DOCTYPE html><html><body>
+    <input id="buildCost" /><input id="interestRate" />
+    <button class="term-btn" data-term="15"></button>
+    <button class="term-btn" data-term="20"></button>
+    <button class="term-btn" data-term="30"></button>
+    <select id="stateSelect"><option value=""></option></select>
+    <input id="propertyTaxRate" />
+    <input id="sellingCosts" /><input id="otherCosts" />
+    <input id="currentLoanBalance" /><input id="currentPayment" />
+    <input id="paycheckAmt" />
+    <button class="payfreq-btn" data-freq="2"></button>
+    <button class="payfreq-btn" data-freq="biweekly"></button>
+    <div id="salePricesList"></div>
+    <button id="btnAddPrice"></button>
+    <div id="resultsArea"></div>
+  </body></html>`, { url });
+  global.window = dom.window;
+  global.document = dom.window.document;
+  global.localStorage = dom.window.localStorage;
+  global.location = dom.window.location;
+  global.history = dom.window.history;
+  return dom;
+}
+
+describe('init: URL drives state (integration)', () => {
+  test('URL params win over localStorage', () => {
+    const dom = makeFullDOM('http://localhost/?build=750000&rate=5.5&term=15');
+    localStorage.setItem('house-planner-v3', JSON.stringify(
+      baseState({ buildCost: '111111', interestRate: '9' })));
+    init();
+    const s = app.__getState();
+    assert.equal(s.buildCost, '750000');
+    assert.equal(s.interestRate, '5.5');
+    assert.equal(s.loanTerm, 15);
+    // ...and the form reflects the URL, not the stored state.
+    assert.equal(document.getElementById('buildCost').value, '750,000');
+    dom.window.close();
+  });
+
+  test('localStorage bootstraps when URL has no params, then fills the URL', () => {
+    const dom = makeFullDOM('http://localhost/');
+    localStorage.setItem('house-planner-v3', JSON.stringify(
+      baseState({ buildCost: '500000', interestRate: '6' })));
+    init();
+    assert.equal(app.__getState().buildCost, '500000');
+    assert.equal(document.getElementById('buildCost').value, '500,000');
+    // init() immediately rewrites the URL from the bootstrapped state.
+    assert.ok(dom.window.location.search.includes('build=500000'));
+    assert.ok(dom.window.location.search.includes('rate=6'));
+    dom.window.close();
+  });
+
+  test('pristine load keeps a clean URL', () => {
+    const dom = makeFullDOM('http://localhost/');
+    init();
+    assert.equal(dom.window.location.search, '');
+    dom.window.close();
+  });
+
+  test('popstate re-derives state from the URL', () => {
+    const dom = makeFullDOM('http://localhost/?build=500000&rate=6');
+    init();
+    assert.equal(app.__getState().buildCost, '500000');
+    dom.window.history.pushState(null, '', '/?build=900000&rate=7&sale=400000');
+    dom.window.dispatchEvent(new dom.window.PopStateEvent('popstate'));
+    const s = app.__getState();
+    assert.equal(s.buildCost, '900000');
+    assert.equal(s.interestRate, '7');
+    assert.deepEqual(s.salePrices, ['400000']);
+    assert.equal(document.getElementById('buildCost').value, '900,000');
+    dom.window.close();
   });
 });

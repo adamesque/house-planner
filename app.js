@@ -34,20 +34,24 @@ const STATE_NAMES = {
   WA: 'Washington', WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming',
 };
 
-let state = {
-  buildCost: '',
-  loanTerm: 30,
-  interestRate: '',
-  stateCode: DEFAULT_STATE,
-  propertyTaxRate: DEFAULT_TAX_RATE,
-  currentLoanBalance: '',
-  salePrices: [''],
-  sellingCosts: '',
-  otherCosts: '',
-  currentPayment: '',
-  paycheckAmt: '',
-  paycheckFreq: '2',
-};
+function defaultState() {
+  return {
+    buildCost: '',
+    loanTerm: 30,
+    interestRate: '',
+    stateCode: DEFAULT_STATE,
+    propertyTaxRate: DEFAULT_TAX_RATE,
+    currentLoanBalance: '',
+    salePrices: [''],
+    sellingCosts: '',
+    otherCosts: '',
+    currentPayment: '',
+    paycheckAmt: '',
+    paycheckFreq: '2',
+  };
+}
+
+let state = defaultState();
 
 // Strip all non-digit characters — used to parse user-typed dollar inputs.
 function parseInput(str) {
@@ -79,6 +83,110 @@ function loadState() {
 
 function saveState() {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch {}
+  // Mirror every persisted change into the URL so the two can't diverge.
+  // Debounced so localStorage still captures in-progress typing immediately
+  // while the URL catches up at most ~400ms behind (or instantly on blur).
+  scheduleURLSync();
+}
+
+// ── Shareable URLs ──────────────────────────────────────────────────────────
+// The query string is the canonical, shareable form of the state. On load,
+// URL params win; localStorage only bootstraps state when the URL carries no
+// recognized params. After that every state change is written back via
+// history.replaceState, and popstate re-derives state from the URL.
+// Params equal to their defaults are omitted to keep URLs short.
+
+const URL_PARAMS = {
+  build: 'buildCost',
+  term: 'loanTerm',
+  rate: 'interestRate',
+  state: 'stateCode',
+  tax: 'propertyTaxRate',
+  balance: 'currentLoanBalance',
+  sale: 'salePrices',
+  selling: 'sellingCosts',
+  other: 'otherCosts',
+  payment: 'currentPayment',
+  paycheck: 'paycheckAmt',
+  freq: 'paycheckFreq',
+};
+
+const FLOAT_RE = /^\d*\.?\d*$/;
+
+function stateToParams(s) {
+  const defaults = defaultState();
+  const params = new URLSearchParams();
+  for (const [name, field] of Object.entries(URL_PARAMS)) {
+    if (field === 'salePrices') {
+      const prices = (s.salePrices || []).map(parseInput).filter(Boolean);
+      if (prices.length) params.set(name, prices.join(','));
+      continue;
+    }
+    const value = String(s[field] == null ? '' : s[field]);
+    if (value !== String(defaults[field])) params.set(name, value);
+  }
+  return params;
+}
+
+// Builds a full state object from URL params. Unknown or invalid values fall
+// back to defaults, and dollar amounts are stripped to raw digit strings, so
+// a hand-edited or truncated URL can never produce a malformed state.
+function paramsToState(params) {
+  const s = defaultState();
+  if (params.has('build')) s.buildCost = parseInput(params.get('build'));
+  if (params.has('term')) {
+    const term = Number(params.get('term'));
+    if ([15, 20, 30].includes(term)) s.loanTerm = term;
+  }
+  if (params.has('rate') && FLOAT_RE.test(params.get('rate'))) {
+    s.interestRate = params.get('rate');
+  }
+  if (params.has('state')) {
+    const code = params.get('state');
+    if (code === '' || STATE_NAMES[code]) s.stateCode = code;
+  }
+  if (params.has('tax') && FLOAT_RE.test(params.get('tax'))) {
+    s.propertyTaxRate = params.get('tax');
+  }
+  if (params.has('balance')) s.currentLoanBalance = parseInput(params.get('balance'));
+  if (params.has('sale')) {
+    const prices = params.get('sale').split(',').map(parseInput).filter(Boolean);
+    s.salePrices = prices.length ? prices : [''];
+  }
+  if (params.has('selling')) s.sellingCosts = parseInput(params.get('selling'));
+  if (params.has('other')) s.otherCosts = parseInput(params.get('other'));
+  if (params.has('payment')) s.currentPayment = parseInput(params.get('payment'));
+  if (params.has('paycheck')) s.paycheckAmt = parseInput(params.get('paycheck'));
+  if (params.has('freq') && ['2', 'biweekly'].includes(params.get('freq'))) {
+    s.paycheckFreq = params.get('freq');
+  }
+  return s;
+}
+
+function hasStateParams(params) {
+  return Object.keys(URL_PARAMS).some(name => params.has(name));
+}
+
+let urlSyncTimer = null;
+
+// Writes the current state into the URL right now (also flushes any pending
+// debounced sync). Safe to call anywhere: no-ops outside a browser context.
+function syncURL() {
+  if (urlSyncTimer !== null) { clearTimeout(urlSyncTimer); urlSyncTimer = null; }
+  if (typeof history === 'undefined' || typeof location === 'undefined') return;
+  // Decode commas in the sale-price list for a friendlier shareable URL.
+  const qs = stateToParams(state).toString().replace(/%2C/gi, ',');
+  const url = location.pathname + (qs ? '?' + qs : '') + location.hash;
+  try { history.replaceState(null, '', url); } catch {}
+}
+
+// Debounced sync so fast typing doesn't hit Safari's replaceState rate limit
+// (~100 calls per 30s). Blur and discrete controls call syncURL() directly.
+function scheduleURLSync() {
+  if (typeof history === 'undefined') return;
+  clearTimeout(urlSyncTimer);
+  urlSyncTimer = setTimeout(syncURL, 400);
+  if (urlSyncTimer.unref) urlSyncTimer.unref(); // don't hold Node test process open
 }
 
 // ── Pure calculation helpers ────────────────────────────────────────────────
@@ -215,12 +323,17 @@ function renderSalePrices() {
       saveState();
       renderResults();
     });
+    // focusout bubbles (blur doesn't) — flush the pending URL sync on blur.
+    list.addEventListener('focusout', e => {
+      if (e.target.classList.contains('sale-price-input')) syncURL();
+    });
     list.addEventListener('click', e => {
       const btn = e.target.closest('.btn-remove');
       if (!btn) return;
       state.salePrices.splice(+btn.dataset.idx, 1);
       if (state.salePrices.length === 0) state.salePrices = [''];
       saveState();
+      syncURL();
       renderSalePrices();
       renderResults();
     });
@@ -321,10 +434,15 @@ function renderResults() {
 
 // ── Wiring ──────────────────────────────────────────────────────────────────
 
+// Dollar inputs whose element id matches their state field name 1:1.
+const DOLLAR_FIELDS = [
+  'buildCost', 'sellingCosts', 'otherCosts',
+  'currentLoanBalance', 'currentPayment', 'paycheckAmt',
+];
+
 // Binds a text input to a dollar-amount state field with live comma formatting.
 // Preserves cursor position relative to end of input so editing feels natural.
-function bindDollarInput(el, getter, setter) {
-  el.value = fmtInput(getter());
+function bindDollarInput(el, setter) {
   el.addEventListener('input', e => {
     const raw = parseInput(e.target.value);
     const formatted = fmtInput(raw);
@@ -336,6 +454,33 @@ function bindDollarInput(el, getter, setter) {
     saveState();
     renderResults();
   });
+  el.addEventListener('blur', syncURL);
+}
+
+function renderPayfreqBtns() {
+  document.querySelectorAll('.payfreq-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.freq === state.paycheckFreq);
+  });
+}
+
+// Writes the current state into every form control and re-renders. Used on
+// init and whenever the URL changes underneath us (popstate), so the page
+// always reflects exactly what the URL/state says.
+function applyStateToDOM() {
+  for (const field of DOLLAR_FIELDS) {
+    const el = document.getElementById(field);
+    if (el) el.value = fmtInput(state[field]);
+  }
+  const rateInput = document.getElementById('interestRate');
+  if (rateInput) rateInput.value = state.interestRate;
+  const taxInput = document.getElementById('propertyTaxRate');
+  if (taxInput) taxInput.value = state.propertyTaxRate;
+  const stateSelect = document.getElementById('stateSelect');
+  if (stateSelect) stateSelect.value = state.stateCode;
+  renderTermButtons();
+  renderPayfreqBtns();
+  renderSalePrices();
+  renderResults();
 }
 
 function populateStateSelect() {
@@ -349,96 +494,70 @@ function populateStateSelect() {
 }
 
 function init() {
-  loadState();
+  // URL params are the source of truth when present; localStorage only
+  // bootstraps state when the URL carries none. Either way the URL is
+  // immediately rewritten from state, so it always reflects the page.
+  const params = typeof location !== 'undefined'
+    ? new URLSearchParams(location.search)
+    : new URLSearchParams();
+  if (hasStateParams(params)) {
+    state = paramsToState(params);
+    saveState();
+  } else {
+    state = defaultState();
+    loadState();
+  }
+  syncURL();
+
   populateStateSelect();
 
-  bindDollarInput(
-    document.getElementById('buildCost'),
-    () => state.buildCost,
-    v => { state.buildCost = v; },
-  );
+  for (const field of DOLLAR_FIELDS) {
+    bindDollarInput(document.getElementById(field), v => { state[field] = v; });
+  }
 
   const rateInput = document.getElementById('interestRate');
-  rateInput.value = state.interestRate;
   rateInput.addEventListener('input', e => {
     state.interestRate = e.target.value;
     saveState(); renderResults();
   });
+  rateInput.addEventListener('blur', syncURL);
 
   document.querySelectorAll('.term-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       state.loanTerm = Number(btn.dataset.term);
       renderTermButtons();
-      saveState(); renderResults();
+      saveState(); syncURL(); renderResults();
     });
   });
-  renderTermButtons();
-
-  bindDollarInput(
-    document.getElementById('sellingCosts'),
-    () => state.sellingCosts,
-    v => { state.sellingCosts = v; },
-  );
-
-  bindDollarInput(
-    document.getElementById('otherCosts'),
-    () => state.otherCosts,
-    v => { state.otherCosts = v; },
-  );
 
   const taxInput = document.getElementById('propertyTaxRate');
 
   // Picking a state fills its average rate as a convenient starting point;
   // the rate field is freely editable for your exact local (county/city) rate.
   const stateSelect = document.getElementById('stateSelect');
-  stateSelect.value = state.stateCode;
   stateSelect.addEventListener('change', e => {
     state.stateCode = e.target.value;
     if (STATE_TAX_RATES[state.stateCode] != null) {
       state.propertyTaxRate = String(STATE_TAX_RATES[state.stateCode]);
       taxInput.value = state.propertyTaxRate;
     }
-    saveState(); renderResults();
+    saveState(); syncURL(); renderResults();
   });
 
-  taxInput.value = state.propertyTaxRate;
   taxInput.addEventListener('input', e => {
     state.propertyTaxRate = e.target.value;
     saveState(); renderResults();
   });
+  taxInput.addEventListener('blur', syncURL);
 
-  bindDollarInput(
-    document.getElementById('currentLoanBalance'),
-    () => state.currentLoanBalance,
-    v => { state.currentLoanBalance = v; },
-  );
-
-  bindDollarInput(
-    document.getElementById('currentPayment'),
-    () => state.currentPayment,
-    v => { state.currentPayment = v; },
-  );
-
-  bindDollarInput(
-    document.getElementById('paycheckAmt'),
-    () => state.paycheckAmt,
-    v => { state.paycheckAmt = v; },
-  );
-
-  function renderPayfreqBtns() {
-    document.querySelectorAll('.payfreq-btn').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.freq === state.paycheckFreq);
-    });
-  }
   document.querySelectorAll('.payfreq-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       state.paycheckFreq = btn.dataset.freq;
       renderPayfreqBtns();
-      saveState();
+      saveState(); syncURL();
       renderResults();
     });
   });
-  renderPayfreqBtns();
 
   document.getElementById('btnAddPrice').addEventListener('click', () => {
     state.salePrices.push('');
@@ -446,8 +565,23 @@ function init() {
     renderSalePrices();
   });
 
-  renderSalePrices();
-  renderResults();
+  // Back/forward navigation: re-derive state from the URL and redraw the
+  // whole form so the page can never disagree with the address bar.
+  if (typeof window !== 'undefined') {
+    window.addEventListener('popstate', () => {
+      const p = new URLSearchParams(location.search);
+      if (hasStateParams(p)) {
+        state = paramsToState(p);
+      } else {
+        state = defaultState();
+        loadState();
+      }
+      saveState();
+      applyStateToDOM();
+    });
+  }
+
+  applyStateToDOM();
 }
 
 // Export pure + internal helpers for the Node test suite. In the browser
@@ -457,7 +591,8 @@ if (typeof module !== 'undefined' && module.exports) {
     STATE_TAX_RATES, STATE_NAMES, DEFAULT_STATE, DEFAULT_TAX_RATE,
     monthlyPayment, monthlyPropertyTax, netProceeds, computeProjection, fmt,
     fmtInput, parseInput,
-    renderResults, renderSalePrices,
+    stateToParams, paramsToState, hasStateParams, syncURL, defaultState,
+    renderResults, renderSalePrices, init,
     __setState: s => { state = s; },
     __getState: () => state,
   };
