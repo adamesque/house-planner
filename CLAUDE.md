@@ -30,7 +30,7 @@ State is a plain object kept in module scope (initialized from `defaultState()`)
 State is mirrored into the query string so any URL is a shareable snapshot. The invariant: **the URL drives page state, and every state change is written back to the URL** — they cannot diverge.
 
 - `stateToParams(s)` / `paramsToState(params)` — pure, tested serializers. Params equal to defaults are omitted (pristine page = clean URL). Invalid param values (bad term, unknown state code, junk floats) fall back to defaults; dollar params are run through `parseInput`. `salePrices` serialize as a comma list (`sale=350000,400000`).
-- Param names: `build`, `term`, `rate`, `state`, `tax`, `balance`, `sale`, `selling`, `other`, `payment`, `paycheck`, `freq` (see `URL_PARAMS` map).
+- Param names: `build`, `term`, `rate`, `state`, `tax`, `balance`, `sale`, `selling`, `other`, `cash`, `rsu`, `payment`, `paycheck`, `freq`, `paycheck2`, `freq2` (see `URL_PARAMS` map — every state field must have an entry or it silently won't be shareable).
 - **Boot order in `init()`**: if the URL has any recognized param, `paramsToState()` wins outright (localStorage is ignored, then overwritten). Only a param-less URL bootstraps from localStorage — and `syncURL()` immediately writes that state into the URL via `replaceState`.
 - **Write-back**: `saveState()` persists to localStorage instantly (captures in-progress typing) and schedules a debounced (~400ms) `syncURL()`. Blur handlers and discrete controls (term/freq buttons, state select, sale-price remove) call `syncURL()` directly to flush. The debounce exists because **Safari rate-limits `replaceState` to ~100 calls per 30s** — don't sync on every keystroke.
 - **`popstate`** re-derives state from the URL and calls `applyStateToDOM()`, which rewrites every form control + re-renders. Use `applyStateToDOM()` any time state changes wholesale.
@@ -49,11 +49,17 @@ State is mirrored into the query string so any URL is a shareable snapshot. The 
   salePrices: [''],       // array of raw digits strings
   sellingCosts: '',       // extra costs that roll into the loan
   otherCosts: '',
+  cashOnHand: '',         // savings applied to reduce the loan
+  rsuFunds: '',           // after-tax RSU/stock proceeds applied to the loan
   currentPayment: '',     // current monthly housing payment (comparison only)
   paycheckAmt: '',        // per-paycheck base take-home (after tax)
   paycheckFreq: '2',      // '2' = semi-monthly, 'biweekly' = ×26/12
+  paycheckAmt2: '',       // partner per-paycheck take-home (optional)
+  paycheckFreq2: '2',
 }
 ```
+
+`cashOnHand + rsuFunds` subtract from `loanNeeded` in **both** projection modes (clamped at 0), and surface as `cashApplied` on the result plus a "Cash applied" breakdown row. They do NOT affect the property tax base.
 
 New fields added later will just default from the initial state object via the `{ ...state, ...JSON.parse(saved) }` spread in `loadState()` — **never bump `STORAGE_KEY`** unless a field is being removed or renamed and you need to drop old data. Migration from legacy keys (`house-planner-v2`, `house-planner-v1`) is already handled.
 
@@ -63,9 +69,18 @@ Dollar amount inputs are `type="text"` with `inputmode="numeric"`. Two helpers m
 
 - `parseInput(str)` — strips all non-digits, returns raw string (e.g. `'500,000'` → `'500000'`)
 - `fmtInput(rawStr)` — adds commas for display (e.g. `'500000'` → `'500,000'`)
-- `bindDollarInput(el, setter)` — attaches a single `input` listener that strips, stores raw, reformats, and preserves cursor-from-end position; plus a `blur` listener that flushes the pending URL sync. Initial values come from `applyStateToDOM()`, not the binding. The static dollar inputs are listed in `DOLLAR_FIELDS` (element id === state field name).
+- `bindDollarInput(el, getter, setter, steps)` — attaches a single `input` listener that strips, stores raw, reformats, and preserves cursor-from-end position; plus a `blur` listener that flushes the pending URL sync. The optional `steps` ([small, big], see the `STEPS` constant) adds a focus-revealed stepper. Initial values come from `applyStateToDOM()`, not the binding. The static dollar inputs live in the `DOLLAR_FIELDS` map (element id === state field name → stepper increments), which drives both the bindings in `init()` and `applyStateToDOM()`.
 
 State always stores raw digit strings. `computeProjection` receives raw strings and uses `parseFloat()` on them.
+
+## Dollar steppers
+
+Every dollar input gets a row of four nudge buttons (`−big −small +small +big`, e.g. `−100k −25k +25k +100k`) revealed only while the field has focus — repositioning the cursor on the mobile numeric keypad is painful, so coarse adjustments happen by button instead.
+
+- Visibility is pure CSS: `.field:focus-within .dollar-stepper` (and `.sale-price-row:focus-within` for the dynamic rows). No JS show/hide.
+- Buttons act on **`pointerdown` with `preventDefault()`** — this stops the input from blurring, which keeps the stepper visible and the iOS keypad open between taps. Do NOT switch to `click`: by the time `click` fires the input has blurred and the (CSS-hidden) button may no longer hit-test.
+- Keyboard activation still arrives as a `click` with `e.detail === 0`; both handlers exist, guarded so they never double-fire.
+- `stepValue(raw, amt)` is the pure helper (clamps at 0, returns `''` for zero). Sale-price steppers are delegated on `#salePricesList` like the inputs.
 
 ## Testing approach
 
@@ -99,7 +114,7 @@ In the browser `module` is undefined, so the block is skipped and everything sta
 
 ## Affordability widget
 
-`affordHTML(totalMonthly)` generates the comparison bar inside each scenario card. It reads `state.paycheckAmt`, `state.paycheckFreq`, and `state.currentPayment` directly (not passed as arguments) and returns an HTML string or `''` if no comparison data is entered.
+`affordHTML(totalMonthly)` generates the comparison bar inside each scenario card. It reads `state.paycheckAmt`/`paycheckFreq`, `state.paycheckAmt2`/`paycheckFreq2` (partner income, summed into the base), and `state.currentPayment` directly (not passed as arguments) and returns an HTML string or `''` if no comparison data is entered.
 
 Color zones: green < 28%, yellow 28–35%, red ≥ 35% of computed monthly base take-home.
 
@@ -107,6 +122,7 @@ The widget is purely additive — nothing in `computeProjection` changes if you 
 
 ## What would be natural next additions
 
-- **Spouse / partner income**: A second `paycheckAmt2` + `paycheckFreq2` pair; sum both into `base` in `affordHTML`. A toggle to show/hide when the spouse isn't working yet.
-- **Savings / down payment offset**: Reduce the loan by cash on hand (currently only sale proceeds reduce it).
-- **Amortization schedule**: Show how many years until equity thresholds are reached.
+The prioritized roadmap and design principles live in [README.md](README.md) —
+keep it as the single source of truth for planned features. Highlights: the
+overlap/bridge period + contract draw-schedule model (the biggest modeling
+gap) and homeowners insurance.

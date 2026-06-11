@@ -5,7 +5,7 @@ const { JSDOM } = require('jsdom');
 const app = require('./app.js');
 const {
   monthlyPayment, monthlyPropertyTax, netProceeds, computeProjection, fmt,
-  fmtInput, parseInput,
+  fmtInput, parseInput, stepValue, stepperHTML, affordHTML, STEPS,
   stateToParams, paramsToState, hasStateParams, defaultState,
   renderResults, renderSalePrices, init, STATE_TAX_RATES, STATE_NAMES,
   DEFAULT_STATE, DEFAULT_TAX_RATE,
@@ -176,6 +176,122 @@ describe('computeProjection', () => {
   });
 });
 
+describe('computeProjection — cash toward the build', () => {
+  test('cash on hand reduces the no-sale loan', () => {
+    const p = computeProjection({
+      ...baseState({ buildCost: '500000', interestRate: '6', salePrices: [] }),
+      cashOnHand: '100000',
+    });
+    assert.equal(p.scenario.loanNeeded, 400000);
+    assert.equal(p.cashApplied, 100000);
+  });
+
+  test('RSU funds and cash on hand both reduce a sale scenario loan', () => {
+    // Build 600k, sell 400k (no payoff) → 200k gap; 50k cash + 75k RSUs → 75k loan
+    const p = computeProjection({
+      ...baseState({ buildCost: '600000', interestRate: '6', salePrices: ['400000'] }),
+      cashOnHand: '50000', rsuFunds: '75000',
+    });
+    assert.equal(p.scenarios[0].loanNeeded, 75000);
+  });
+
+  test('cash covering the full build → zero loan, tax-only payment', () => {
+    const p = computeProjection({
+      ...baseState({ buildCost: '300000', interestRate: '6', propertyTaxRate: '1.2', salePrices: [] }),
+      cashOnHand: '350000',
+    });
+    assert.equal(p.scenario.loanNeeded, 0);
+    assert.equal(p.scenario.principalInterest, 0);
+    assert.equal(p.scenario.fullyCovered, true);
+    assert.equal(p.scenario.totalMonthly, 300); // 300k * 1.2% / 12
+  });
+
+  test('cash does not affect the property tax base', () => {
+    const p = computeProjection({
+      ...baseState({ buildCost: '500000', interestRate: '6', propertyTaxRate: '1.2', salePrices: [] }),
+      cashOnHand: '200000',
+    });
+    assert.equal(p.scenario.propertyTax, 500); // still 500k * 1.2% / 12
+  });
+});
+
+describe('stepValue', () => {
+  test('adds the step to a raw value', () => assert.equal(stepValue('500000', 100000), '600000'));
+  test('subtracts the step', () => assert.equal(stepValue('500000', -25000), '475000'));
+  test('steps up from empty', () => assert.equal(stepValue('', 25000), '25000'));
+  test('clamps at zero and returns empty', () => assert.equal(stepValue('50000', -100000), ''));
+  test('exact zero returns empty', () => assert.equal(stepValue('500', -500), ''));
+});
+
+describe('stepperHTML', () => {
+  test('renders four buttons: −big −small +small +big', () => {
+    const html = stepperHTML([25000, 100000]);
+    const amts = [...html.matchAll(/data-amt="(-?\d+)"/g)].map(m => Number(m[1]));
+    assert.deepEqual(amts, [-100000, -25000, 25000, 100000]);
+  });
+  test('labels thousands as k', () => {
+    const html = stepperHTML([25000, 100000]);
+    assert.ok(html.includes('+100k') && html.includes('−25k'));
+  });
+  test('labels sub-thousand steps as plain numbers', () => {
+    const html = stepperHTML(STEPS.monthly);
+    assert.ok(html.includes('+500') && html.includes('−100'));
+  });
+});
+
+describe('affordHTML — combined incomes', () => {
+  beforeEach(makeDOM);
+
+  test('empty when no comparison data', () => {
+    __setState(baseState());
+    assert.equal(affordHTML(3000), '');
+  });
+
+  test('partner income alone enables the bar', () => {
+    __setState({ ...baseState(), paycheckAmt: '', paycheckFreq: '2', paycheckAmt2: '5000', paycheckFreq2: '2' });
+    // base = 10,000 → 3000 = 30%
+    assert.ok(affordHTML(3000).includes('30% of base take-home'));
+  });
+
+  test('sums both paychecks with their own frequencies', () => {
+    __setState({
+      ...baseState(),
+      paycheckAmt: '4000', paycheckFreq: '2',          // 8,000/mo
+      paycheckAmt2: '2400', paycheckFreq2: 'biweekly', // 2400 * 26/12 = 5,200/mo
+    });
+    // base = 13,200 → 3300 = 25%
+    assert.ok(affordHTML(3300).includes('25% of base take-home'));
+  });
+});
+
+describe('dollar steppers (DOM)', () => {
+  beforeEach(makeDOM);
+
+  test('each sale price row renders a stepper', () => {
+    __setState(baseState({ salePrices: ['300000', '400000'] }));
+    renderSalePrices();
+    assert.equal(document.querySelectorAll('.dollar-stepper').length, 2);
+    assert.equal(document.querySelectorAll('.step-btn').length, 8);
+  });
+
+  test('step button bumps the right sale price', () => {
+    __setState(baseState({ buildCost: '500000', interestRate: '6', salePrices: ['300000', '400000'] }));
+    renderSalePrices();
+    const plus100k = document.querySelector('.dollar-stepper[data-idx="1"] .step-btn[data-amt="100000"]');
+    plus100k.click(); // jsdom click has detail 0 → keyboard path
+    assert.equal(app.__getState().salePrices[1], '500000');
+    assert.equal(app.__getState().salePrices[0], '300000');
+    assert.equal(document.querySelector('.sale-price-input[data-idx="1"]').value, '500,000');
+  });
+
+  test('stepping below zero clears the price', () => {
+    __setState(baseState({ buildCost: '500000', interestRate: '6', salePrices: ['50000'] }));
+    renderSalePrices();
+    document.querySelector('.step-btn[data-amt="-100000"]').click();
+    assert.equal(app.__getState().salePrices[0], '');
+  });
+});
+
 describe('fmtInput / parseInput', () => {
   test('fmtInput adds commas', () => assert.equal(fmtInput('500000'), '500,000'));
   test('fmtInput 1M', () => assert.equal(fmtInput('1000000'), '1,000,000'));
@@ -310,8 +426,9 @@ describe('stateToParams / paramsToState', () => {
       buildCost: '500000', loanTerm: 15, interestRate: '6.75',
       stateCode: 'CA', propertyTaxRate: '0.71', currentLoanBalance: '150000',
       salePrices: ['350000', '400000'], sellingCosts: '25000',
-      otherCosts: '10000', currentPayment: '2100', paycheckAmt: '4250',
-      paycheckFreq: 'biweekly',
+      otherCosts: '10000', cashOnHand: '80000', rsuFunds: '45000',
+      currentPayment: '2100', paycheckAmt: '4250', paycheckFreq: 'biweekly',
+      paycheckAmt2: '3100', paycheckFreq2: 'biweekly',
     };
     assert.deepEqual(paramsToState(stateToParams(s)), s);
   });
@@ -361,18 +478,23 @@ describe('stateToParams / paramsToState', () => {
 // Full-page fixture with every element init() wires up, so we can test the
 // URL ⇄ state ⇄ localStorage bootstrapping end to end.
 function makeFullDOM(url = 'http://localhost/') {
+  const wrap = id => `<div class="input-wrap"><input id="${id}" /></div>`;
+  const freqBtns = id => `<div id="${id}">
+    <button class="payfreq-btn" data-freq="2"></button>
+    <button class="payfreq-btn" data-freq="biweekly"></button>
+  </div>`;
   const dom = new JSDOM(`<!DOCTYPE html><html><body>
-    <input id="buildCost" /><input id="interestRate" />
+    ${wrap('buildCost')}<input id="interestRate" />
     <button class="term-btn" data-term="15"></button>
     <button class="term-btn" data-term="20"></button>
     <button class="term-btn" data-term="30"></button>
     <select id="stateSelect"><option value=""></option></select>
     <input id="propertyTaxRate" />
-    <input id="sellingCosts" /><input id="otherCosts" />
-    <input id="currentLoanBalance" /><input id="currentPayment" />
-    <input id="paycheckAmt" />
-    <button class="payfreq-btn" data-freq="2"></button>
-    <button class="payfreq-btn" data-freq="biweekly"></button>
+    ${wrap('sellingCosts')}${wrap('otherCosts')}
+    ${wrap('cashOnHand')}${wrap('rsuFunds')}
+    ${wrap('currentLoanBalance')}${wrap('currentPayment')}
+    ${wrap('paycheckAmt')}${wrap('paycheckAmt2')}
+    ${freqBtns('payfreqBtns1')}${freqBtns('payfreqBtns2')}
     <div id="salePricesList"></div>
     <button id="btnAddPrice"></button>
     <div id="resultsArea"></div>
