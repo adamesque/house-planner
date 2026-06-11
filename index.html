@@ -156,7 +156,7 @@
 
     /* Segmented term buttons */
     .segmented { display: flex; }
-    .term-btn {
+    .term-btn, .months-btn {
       flex: 1;
       min-height: 48px;
       padding: 0.6rem 0;
@@ -170,9 +170,54 @@
       cursor: pointer;
       transition: background 0.15s;
     }
-    .term-btn:first-child { border-left-width: 1px; }
-    .term-btn:hover { background: var(--accent-dim); }
-    .term-btn.active { background: var(--accent); }
+    .term-btn:first-child, .months-btn:first-child { border-left-width: 1px; }
+    .term-btn:hover, .months-btn:hover { background: var(--accent-dim); }
+    .term-btn.active, .months-btn.active { background: var(--accent); }
+
+    /* Build-phase carrying-cost chart */
+    .build-chart {
+      display: flex;
+      align-items: flex-end;
+      gap: 2px;
+      height: 110px;
+      border-bottom: 1px solid var(--ink);
+      margin-top: 1rem;
+    }
+    .bc-col {
+      flex: 1;
+      min-width: 0;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+    }
+    .bc-int { background: var(--accent); }
+    .bc-base { background: var(--rule); }
+    .bc-axis {
+      display: flex;
+      justify-content: space-between;
+      font-family: var(--mono);
+      font-size: 0.62rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--faint);
+      padding-top: 0.3rem;
+      margin-bottom: 0.6rem;
+    }
+    .bc-legend {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-family: var(--mono);
+      font-size: 0.62rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--ink-soft);
+      margin-bottom: 0.5rem;
+    }
+    .bc-key { width: 10px; height: 10px; display: inline-block; border: 1px solid var(--ink); flex-shrink: 0; }
+    .bc-key-int { background: var(--accent); }
+    .bc-key-base { background: var(--rule); }
 
     /* Sale prices */
     .sale-prices-list { display: flex; flex-direction: column; gap: 0.6rem; }
@@ -481,9 +526,35 @@
     </div>
   </div>
 
+  <!-- Construction phase -->
+  <div class="card">
+    <h2><span class="sec-num">03</span> During the Build</h2>
+
+    <div class="field-row">
+      <div class="field">
+        <label>Build duration</label>
+        <div class="segmented">
+          <button type="button" class="months-btn" data-months="9">9 mo</button>
+          <button type="button" class="months-btn" data-months="12">12 mo</button>
+          <button type="button" class="months-btn" data-months="18">18 mo</button>
+          <button type="button" class="months-btn" data-months="24">24 mo</button>
+        </div>
+      </div>
+      <div class="field">
+        <label for="constructionRate">Construction rate <span class="hint">(blank = mortgage + 1%)</span></label>
+        <div class="input-wrap has-suffix">
+          <input type="number" id="constructionRate" min="0" max="30" step="any" placeholder="optional" />
+          <span class="input-suffix">%</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="buildPhaseArea"></div>
+  </div>
+
   <!-- Results -->
   <div class="card">
-    <h2><span class="sec-num">03</span> Monthly Payment Scenarios</h2>
+    <h2><span class="sec-num">04</span> Monthly Payment Scenarios</h2>
     <div id="resultsArea"></div>
   </div>
 </div>

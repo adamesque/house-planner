@@ -41,6 +41,8 @@ State is a plain object kept in module scope. `saveState()` / `loadState()` pers
   currentPayment: '',     // current monthly housing payment (comparison only)
   paycheckAmt: '',        // per-paycheck base take-home (after tax)
   paycheckFreq: '2',      // '2' = semi-monthly, 'biweekly' = ×26/12
+  buildMonths: '12',      // construction duration: '9' | '12' | '18' | '24'
+  constructionRate: '',   // string %, blank = interestRate + 1
 }
 ```
 
@@ -93,6 +95,31 @@ In the browser `module` is undefined, so the block is skipped and everything sta
 Color zones: green < 28%, yellow 28–35%, red ≥ 35% of computed monthly base take-home.
 
 The widget is purely additive — nothing in `computeProjection` changes if you add or remove comparison fields.
+
+## Construction phase ("During the Build")
+
+`computeBuildPhase(s)` (pure, exported) models the carrying cost during
+construction: interest-only on the drawn construction loan balance, stacked on
+top of `currentPayment`. Design decisions:
+
+- **No draw schedule input.** Draws follow a smoothstep S-curve
+  (`drawCurve(t) = 3t² − 2t³`), a standard approximation of residential draw
+  schedules (slow start, fast middle, slow finish). The user only picks a
+  build duration (segmented 9/12/18/24 mo, `.months-btn` — deliberately a
+  separate class from `.term-btn` so the term click handlers don't grab them).
+- **Construction rate defaults to `interestRate + 1`** (typical spread over a
+  conventional mortgage) when `constructionRate` is blank. `rateAssumed: true`
+  flags this so the UI labels it "(assumed)".
+- Interest is computed on the **end-of-month** drawn balance — slightly
+  conservative (high) by design.
+- `renderBuildPhase()` renders into `#buildPhaseArea` and **null-guards the
+  container** so DOM tests without that element don't break. The chart is a
+  stacked CSS flexbox bar chart (`.bc-col` / `.bc-base` / `.bc-int`) — no
+  chart library, no SVG. It reuses `affordHTML(peak.carry)` for the
+  affordability bar against the peak month.
+- `renderAll()` = `renderBuildPhase()` + `renderResults()`; input listeners
+  call it instead of `renderResults()` since build cost, rates, paycheck, and
+  current payment feed both views.
 
 ## What would be natural next additions
 

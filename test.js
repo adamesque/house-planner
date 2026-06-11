@@ -5,8 +5,8 @@ const { JSDOM } = require('jsdom');
 const app = require('./app.js');
 const {
   monthlyPayment, monthlyPropertyTax, netProceeds, computeProjection, fmt,
-  fmtInput, parseInput,
-  renderResults, renderSalePrices, STATE_TAX_RATES, STATE_NAMES,
+  fmtInput, parseInput, drawCurve, computeBuildPhase,
+  renderResults, renderSalePrices, renderBuildPhase, STATE_TAX_RATES, STATE_NAMES,
   DEFAULT_STATE, DEFAULT_TAX_RATE,
   __setState,
 } = app;
@@ -15,6 +15,7 @@ const {
 function makeDOM() {
   const dom = new JSDOM(`<!DOCTYPE html><html><body>
     <div id="salePricesList"></div>
+    <div id="buildPhaseArea"></div>
     <div id="resultsArea"></div>
   </body></html>`, { url: 'http://localhost' });
   global.document = dom.window.document;
@@ -175,6 +176,100 @@ describe('computeProjection', () => {
   });
 });
 
+describe('drawCurve', () => {
+  test('nothing drawn at start', () => assert.equal(drawCurve(0), 0));
+  test('fully drawn at completion', () => assert.equal(drawCurve(1), 1));
+  test('half drawn at midpoint', () => assert.equal(drawCurve(0.5), 0.5));
+  test('S-shape: slow start', () => assert.ok(drawCurve(0.25) < 0.25));
+  test('S-shape: slow finish', () => assert.ok(drawCurve(0.75) > 0.75));
+  test('monotonically increasing', () => {
+    for (let t = 0.1; t <= 1; t += 0.1) {
+      assert.ok(drawCurve(t) > drawCurve(t - 0.1));
+    }
+  });
+});
+
+describe('computeBuildPhase', () => {
+  function buildState(overrides = {}) {
+    return baseState({ buildCost: '500000', interestRate: '6', buildMonths: '12', ...overrides });
+  }
+
+  test('not ready without build cost', () => {
+    assert.equal(computeBuildPhase(buildState({ buildCost: '' })).ready, false);
+  });
+  test('not ready without any rate', () => {
+    assert.equal(computeBuildPhase(buildState({ interestRate: '' })).ready, false);
+  });
+  test('not ready without duration', () => {
+    assert.equal(computeBuildPhase(buildState({ buildMonths: '' })).ready, false);
+  });
+
+  test('defaults construction rate to mortgage + 1%', () => {
+    const bp = computeBuildPhase(buildState());
+    assert.equal(bp.rate, 7);
+    assert.equal(bp.rateAssumed, true);
+  });
+
+  test('explicit construction rate overrides the default', () => {
+    const bp = computeBuildPhase(buildState({ constructionRate: '8.5' }));
+    assert.equal(bp.rate, 8.5);
+    assert.equal(bp.rateAssumed, false);
+  });
+
+  test('works with explicit rate and no mortgage rate', () => {
+    const bp = computeBuildPhase(buildState({ interestRate: '', constructionRate: '8' }));
+    assert.equal(bp.ready, true);
+    assert.equal(bp.rate, 8);
+  });
+
+  test('one row per month of the build', () => {
+    assert.equal(computeBuildPhase(buildState()).rows.length, 12);
+    assert.equal(computeBuildPhase(buildState({ buildMonths: '18' })).rows.length, 18);
+  });
+
+  test('fully drawn in the final month', () => {
+    const bp = computeBuildPhase(buildState());
+    assert.equal(bp.peak.drawn, 500000);
+  });
+
+  test('peak interest = full balance at construction rate', () => {
+    const bp = computeBuildPhase(buildState());
+    // 500k * 7% / 12 ≈ 2,916.67
+    assert.ok(Math.abs(bp.peak.interest - 2916.67) < 0.01);
+  });
+
+  test('interest grows month over month', () => {
+    const bp = computeBuildPhase(buildState());
+    for (let i = 1; i < bp.rows.length; i++) {
+      assert.ok(bp.rows[i].interest > bp.rows[i - 1].interest);
+    }
+  });
+
+  test('total interest is below worst case (full balance all months)', () => {
+    const bp = computeBuildPhase(buildState());
+    const worstCase = 500000 * (0.07 / 12) * 12;
+    assert.ok(bp.totalInterest > 0 && bp.totalInterest < worstCase);
+  });
+
+  test('S-curve total beats half of worst case (back-loaded draws)', () => {
+    const bp = computeBuildPhase(buildState());
+    const evenAverage = 500000 * (0.07 / 12) * 12 / 2;
+    // Smoothstep cumulative averages exactly 50% drawn, sampled at month ends → slightly above half.
+    assert.ok(Math.abs(bp.totalInterest - evenAverage) < evenAverage * 0.1);
+  });
+
+  test('carry stacks current payment on top of interest', () => {
+    const bp = computeBuildPhase({ ...buildState(), currentPayment: '2100' });
+    assert.equal(bp.currentPayment, 2100);
+    assert.ok(Math.abs(bp.peak.carry - (2100 + bp.peak.interest)) < 0.001);
+  });
+
+  test('carry is interest-only without a current payment', () => {
+    const bp = computeBuildPhase(buildState());
+    assert.equal(bp.peak.carry, bp.peak.interest);
+  });
+});
+
 describe('fmtInput / parseInput', () => {
   test('fmtInput adds commas', () => assert.equal(fmtInput('500000'), '500,000'));
   test('fmtInput 1M', () => assert.equal(fmtInput('1000000'), '1,000,000'));
@@ -256,6 +351,49 @@ describe('renderResults (DOM)', () => {
     __setState(baseState({ buildCost: '400000', interestRate: '6', salePrices: ['450000'] }));
     renderResults();
     assert.ok(document.getElementById('resultsArea').innerHTML.includes('fully covered'));
+  });
+});
+
+describe('renderBuildPhase (DOM)', () => {
+  beforeEach(makeDOM);
+
+  test('prompts when not ready', () => {
+    __setState(baseState({ interestRate: '6', buildMonths: '12' }));
+    renderBuildPhase();
+    assert.ok(document.getElementById('buildPhaseArea').innerHTML.includes('Enter a build cost'));
+  });
+
+  test('renders one chart bar per month', () => {
+    __setState(baseState({ buildCost: '500000', interestRate: '6', buildMonths: '18' }));
+    renderBuildPhase();
+    assert.equal(document.querySelectorAll('.bc-col').length, 18);
+  });
+
+  test('headlines the peak monthly carry', () => {
+    __setState(baseState({ buildCost: '500000', interestRate: '6', buildMonths: '12' }));
+    renderBuildPhase();
+    const html = document.getElementById('buildPhaseArea').innerHTML;
+    // Peak = 500k fully drawn at 7% (assumed) / 12 ≈ $2,917
+    assert.ok(html.includes('$2,917'));
+    assert.ok(html.includes('/mo at peak'));
+  });
+
+  test('legend and base bars only appear with a current payment', () => {
+    __setState(baseState({ buildCost: '500000', interestRate: '6', buildMonths: '12' }));
+    renderBuildPhase();
+    assert.equal(document.querySelectorAll('.bc-base').length, 0);
+    assert.equal(document.querySelectorAll('.bc-legend').length, 0);
+
+    __setState({ ...baseState({ buildCost: '500000', interestRate: '6', buildMonths: '12' }), currentPayment: '2100' });
+    renderBuildPhase();
+    assert.equal(document.querySelectorAll('.bc-base').length, 12);
+    assert.equal(document.querySelectorAll('.bc-legend').length, 1);
+  });
+
+  test('no-op when the build phase container is absent', () => {
+    document.getElementById('buildPhaseArea').remove();
+    __setState(baseState({ buildCost: '500000', interestRate: '6', buildMonths: '12' }));
+    assert.doesNotThrow(() => renderBuildPhase());
   });
 });
 
